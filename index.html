@@ -152,26 +152,31 @@
       </div>
     </div>
     
-    <div class="quiz-results">
-      <h3>答题记录</h3>
-      <div id="quizHistory" class="quiz-history"></div>
-    </div>
-    
     <div class="quiz-content">
       <div class="quiz-q">
         <div id="quizQuestion"></div>
         <div id="quizHint" class="hint"></div>
       </div>
-      <div class="quiz-a">
-        <input id="quizAnswer" type="text" placeholder="在此作答…" />
-        <button id="btnSubmitAnswer">提交</button>
-        <button id="btnSkip">跳过</button>
-      </div>
       <div id="quizResult" class="result"></div>
+    </div>
+
+    <div class="quiz-results">
+      <h3>答题记录</h3>
+      <div id="quizHistory" class="quiz-history"></div>
     </div>
     
     <div class="quiz-footer">
-      <button id="btnEndQuiz" class="secondary">结束测验</button>
+      <div id="quizControls" style="display: block;">
+        <div class="quiz-a">
+          <input id="quizAnswer" type="text" placeholder="在此作答…" />
+          <button id="btnSubmitAnswer">提交</button>
+          <button id="btnSkip">跳过</button>
+        </div>
+        <button id="btnEndQuiz" class="secondary">结束测验</button>
+      </div>
+      <div id="quizPostGradingControls" style="display: none;">
+        <button id="btnCloseQuiz" class="primary">查看完毕，关闭面板</button>
+      </div>
     </div>
   </div>
 </section>

@@ -4,6 +4,7 @@ import { savePage, getPage, listPages, deletePage, saveApiConfig, loadApiConfig,
 import { extractWordsFromImage, parseManualJson } from "./extract.js";
 import { QuizEngine } from "./quiz.js";
 
+const SKIPPED_ANSWER = "__SKIPPED__";
 let client = new QwenClient({});
 
 const $ = s => document.querySelector(s);
@@ -41,26 +42,25 @@ function refreshExamHistory() {
   const historyList = $("#examHistoryList");
   const history = getExamHistoryList();
   
-  console.log("考试历史记录:", history); // 调试信息
-  
   if (history.length === 0) {
     historyList.innerHTML = '<div class="no-history">暂无考试记录</div>';
     return;
   }
   
   historyList.innerHTML = history.map(item => {
-    const typeClass = item.type.includes('SEQ') ? 'type-seq' : 
+    const accuracyClass = item.accuracy >= 80 ? 'good' : item.accuracy >= 60 ? 'warn' : 'bad';
+    const typeClass = item.type.includes('SEQ') ? 'type-seq' :
                      item.type.includes('READING') ? 'type-reading' :
                      item.type.includes('SHUFFLE') ? 'type-shuffle' : 'type-fuzzy';
     
     return `
       <div class="exam-history-item ${typeClass}">
-        <div class="count">${item.count}</div>
-        <div class="page">${item.page}</div>
+        <div class="count">${item.total}题</div>
+        <div class="page">P. ${item.page}</div>
         <div class="type">${item.typeName}</div>
-        <div class="result">${item.result}</div>
-        <div class="accuracy ${item.accuracyClass}">${item.accuracy}%</div>
-        <div class="time">${formatTime(item.lastTime)}</div>
+        <div class="result">${item.correct}/${item.total}</div>
+        <div class="accuracy ${accuracyClass}">${item.accuracy}%</div>
+        <div class="time">${formatTime(item.time)}</div>
       </div>
     `;
   }).join('');
@@ -107,7 +107,6 @@ function readApiCfgFromUI() {
 
 async function onExtract() {
   readApiCfgFromUI();
-  // let page = Number($("#pageNumber").value);
   const file = $("#pageImage").files?.[0];
   const status = $("#extractStatus");
   
@@ -118,24 +117,10 @@ async function onExtract() {
   
   try {
     const dataURL = await fileToDataURL(file);
-    
-    // 如果没有输入页码，尝试自动检测
-    // if (!page) {
-    //   status.textContent = "正在检测页码…";
-    //   page = await detectPageNumber(client, dataURL);
-    //   if (!page) {
-    //     toastStatus(status, "无法自动检测页码，请手动输入");
-    //     return;
-    //   }
-    //   $("#pageNumber").value = String(page);
-    //   status.textContent = `检测到页码：${page}，正在进行词汇提取…`;
-    // } else {
-    //   status.textContent = "正在调用千问进行结构化提取…";
-    // }
-    
+    status.textContent = "正在调用千问进行结构化提取…";
     const result = await extractWordsFromImage(client, dataURL);
     savePage(result.page, result.items);
-    $("#pageNumber").value = String(result.page); // 更新页码输入框
+    $("#pageNumber").value = String(result.page);
     renderTable(result.items);
     refreshSavedPages();
     toastStatus(status, `提取成功，已保存页 ${result.page}（${result.items.length} 条）`);
@@ -179,7 +164,6 @@ function onParseJson() {
       return;
     }
     
-    // 如果JSON中有页码且与输入的不同，使用JSON中的页码
     const finalPage = result.page || page;
     if (result.page && result.page !== page) {
       $("#manualPageNumber").value = String(finalPage);
@@ -203,14 +187,10 @@ async function startQuiz(mode) {
   let page = Number($("#pageNumber").value);
   let items = getPage(page);
   
-  // 如果页码输入框为空或没有数据，尝试从已保存页面中选择
-  if (!page || !items || !items.length) {
-    const savedPage = Number($("#savedPages").value);
-    if (savedPage) {
-      page = savedPage;
-      items = getPage(savedPage);
-      $("#pageNumber").value = String(savedPage); // 更新页码输入框
-    }
+  if ((!page || !items || !items.length) && $("#savedPages").value) {
+    page = Number($("#savedPages").value);
+    items = getPage(page);
+    $("#pageNumber").value = String(page);
   }
   
   if (!items || !items.length) { 
@@ -218,34 +198,39 @@ async function startQuiz(mode) {
     return; 
   }
 
-  const judgeFuzzy = async (goldCN, userCN) => {
-    // 调用千问进行模糊判定（仅在 JP→CN 模式使用）
+  const judgeFuzzyBatch = async (pairs) => {
+    const prompt = `你是日汉释义判定器。你将收到一个JSON数组，每个对象包含一个标准释义和一个用户答案。请判断每个用户答案是否与标准释义“基本一致/大致正确”，允许同义词和语序差异。你需要返回一个与输入等长的JSON数组，每个对象包含{"correct": true|false, "reason": "一句话理由"}。不要输出任何额外文本。\n\n输入：\n${JSON.stringify(pairs, null, 2)}`;
     const messages = [
-      { role: "system", content: [{ type: "text", text: "你是日汉释义判定器。仅返回 JSON，不要多余文本。" }] },
-      { role: "user", content: [
-        { type: "text", text:
-`标准中文释义：${goldCN}
-用户答案：${userCN}
-
-判断用户答案与标准释义是否“基本一致/大致正确”，允许常见同义词、措辞差异。
-输出严格 JSON：{"correct": true|false, "reason": "一句话理由（中文）"}` }
-      ]}
+        { role: "system", content: [{ type: "text", text: "你是一个严格的JSON格式输出助理。" }] },
+        { role: "user", content: [{ type: "text", text: prompt }] }
     ];
     try {
       const content = await client.chat(messages, { temperature: 0.0, response_format: { type: "json_object" } });
-      return JSON.parse(content);
+      const parsed = JSON.parse(content);
+      
+      const resultsArray = Array.isArray(parsed) ? parsed : parsed.results || parsed.data;
+
+      if (!Array.isArray(resultsArray)) {
+        console.error("API response did not contain a valid results array.", parsed);
+        throw new Error("API返回格式无效");
+      }
+      if (resultsArray.length !== pairs.length) {
+        console.error(`API returned ${resultsArray.length} results, but ${pairs.length} were expected.`, resultsArray);
+        throw new Error(`API返回结果数量不匹配`);
+      }
+
+      return resultsArray;
+
     } catch (e) {
-      console.warn("判定失败，回退到简单包含匹配", e);
-      const ok = userCN && goldCN && (userCN === goldCN || goldCN.includes(userCN) || userCN.includes(goldCN));
-      return { correct: ok, reason: ok ? "近似匹配" : "不匹配" };
+      console.error("调用千问批量判定API失败", e);
+      throw new Error(`AI评分接口调用失败: ${e.message}`);
     }
   };
 
-  engine = new QuizEngine(items, mode, { judgeFuzzy });
-  quizHistory = []; // 清空答题历史
-  $("#quizHistory").innerHTML = ""; // 清空历史显示
+  engine = new QuizEngine(items, mode, { judgeFuzzyBatch });
+  quizHistory = [];
+  $("#quizHistory").innerHTML = "";
   
-  // 记录当前考试信息
   const typeName = mode === "CN_JP_SEQ" ? "顺序考（问中文→答日文）" :
                    mode === "CN_JP_SHUFFLE" ? "乱序考（问中文→答日文）" :
                    mode === "JP_READING_SHUFFLE" ? "乱序考（问日文→答假名读音）" :
@@ -260,6 +245,8 @@ async function startQuiz(mode) {
   
   $("#quizPanel").classList.remove("hidden");
   $("#quizMode").textContent = typeName;
+  $("#quizControls").style.display = "block";
+  $("#quizPostGradingControls").style.display = "none";
   nextQuestion();
 }
 
@@ -275,101 +262,181 @@ function nextQuestion() {
   $("#quizResult").className = "result";
 }
 
-async function submitAnswer(skip=false) {
-  if (!engine) return;
-  const ans = skip ? "" : $("#quizAnswer").value.trim();
-  const currentQuestion = engine.currentQuestion();
-  const res = await engine.answer(ans);
-  const el = $("#quizResult");
-  
-  // 记录答题历史
-  const historyItem = {
-    question: currentQuestion.text,
-    answer: ans || "(跳过)",
-    correct: skip ? "skipped" : res.ok ? "correct" : "incorrect",
-    reason: res.reason || ""
-  };
-  quizHistory.push(historyItem);
-  updateQuizHistory();
-  
-  if (skip) {
-    el.textContent = "已跳过";
-    el.className = "result warn";
-  } else if (res.ok) {
-    el.textContent = "✅ 正确！";
-    el.className = "result good";
-  } else {
-    el.textContent = "❌ 不正确。" + (res.reason ? " " + res.reason : "");
-    el.className = "result bad";
-  }
-  $("#quizProgress").textContent = `进度：${Math.min(res.progress.cur, engine.total)}/${engine.total} · 得分：${engine.correct}`;
-  setTimeout(()=>{
-    if (res.done) endQuiz();
-    else nextQuestion();
-  }, 600);
+async function submitAnswer(skip = false) {
+    if (!engine) return;
+
+    const currentQuestion = engine.currentQuestion();
+    const originalIndex = engine.index;
+    const ans = $("#quizAnswer").value.trim();
+    const answerPayload = skip ? SKIPPED_ANSWER : ans;
+
+    const res = await engine.answer(answerPayload);
+
+    const historyItem = {
+        question: currentQuestion.text,
+        answer: skip ? "(跳过)" : ans,
+        correct: 'pending',
+        reason: '',
+        originalIndex: originalIndex
+    };
+
+    const isFuzzyMode = engine.mode === "JP_CN_FUZZY_SHUFFLE";
+
+    if (isFuzzyMode) {
+        if (skip) {
+            historyItem.correct = 'skipped';
+        }
+    } else {
+        historyItem.correct = skip ? 'skipped' : (res.ok ? 'correct' : 'incorrect');
+        historyItem.reason = res.reason || '';
+    }
+
+    quizHistory.push(historyItem);
+    updateQuizHistory();
+
+    const el = $("#quizResult");
+    if (historyItem.correct === 'pending') {
+        el.textContent = "答案已记录";
+        el.className = "result";
+    } else if (historyItem.correct === 'skipped') {
+        el.textContent = "已跳过";
+        el.className = "result warn";
+    } else if (res.ok) {
+        el.textContent = "✅ 正确！";
+        el.className = "result good";
+    } else {
+        el.textContent = "❌ 不正确。" + (res.reason ? " " + res.reason : "");
+        el.className = "result bad";
+    }
+
+    $("#quizProgress").textContent = `进度：${res.progress.cur}/${res.progress.total}`;
+    if (!isFuzzyMode) {
+        $("#quizProgress").textContent += ` · 得分：${engine.correct}`;
+    }
+    
+    const delay = isFuzzyMode ? 0 : 800;
+    setTimeout(() => {
+        if (res.done) {
+            endQuiz(true);
+        } else {
+            nextQuestion();
+        }
+    }, delay);
 }
 
 function updateQuizHistory() {
   const historyContainer = $("#quizHistory");
   historyContainer.innerHTML = "";
   
-  quizHistory.forEach((item, index) => {
+  quizHistory.forEach((item) => {
     const div = document.createElement("div");
     div.className = `quiz-history-item ${item.correct}`;
     
-    const resultText = item.correct === "correct" ? "✓" : 
-                      item.correct === "incorrect" ? "✗" : "跳过";
+    let resultText;
+    switch (item.correct) {
+      case "correct": resultText = "✓"; break;
+      case "incorrect": resultText = "✗"; break;
+      case "skipped": resultText = "跳过"; break;
+      case "pending": resultText = "待评分"; break;
+      default: resultText = "?";
+    }
     
-    const reasonText = item.reason || "";
-
     div.innerHTML = `
       <div class="question">${item.question}</div>
       <div class="answer">${item.answer}</div>
       <div class="result">${resultText}</div>
-      <div class="reason">${reasonText}</div>
+      <div class="reason">${item.reason}</div>
     `;
     
     historyContainer.appendChild(div);
   });
   
-  // 滚动到底部显示最新记录
   historyContainer.scrollTop = historyContainer.scrollHeight;
 }
 
-function endQuiz(auto=false) {
+async function endQuiz(isAutoEnd = false) {
   if (!engine || !currentExamInfo) return;
-  
-  const final = `测验结束：${engine.correct}/${engine.total}`;
-  $("#quizResult").textContent = final;
+
+  const isFuzzyMode = engine.mode === "JP_CN_FUZZY_SHUFFLE";
+
+  if (isFuzzyMode) {
+    if (!isAutoEnd && !confirm("确认要提前结束并对已答题目进行评分吗？")) {
+      return;
+    }
+
+    const el = $("#quizResult");
+    el.textContent = "正在评分，请稍候...";
+    el.className = "result";
+    $("#quizControls").style.display = "none";
+
+    try {
+      console.log("--- Starting Batch Grading ---");
+      const finalResults = await engine.gradeFuzzyAnswers();
+      console.log("Raw results from engine:", JSON.stringify(finalResults));
+      console.log("Quiz history before update:", JSON.stringify(quizHistory));
+
+      quizHistory.forEach((historyItem) => {
+        if (historyItem.correct === 'pending') {
+          const result = finalResults[historyItem.originalIndex];
+          if (result) {
+            historyItem.correct = result.ok ? 'correct' : 'incorrect';
+            historyItem.reason = result.reason;
+          } else {
+            console.error(`Result missing for pending item with original index ${historyItem.originalIndex}.`);
+            historyItem.reason = "评分数据丢失或不匹配";
+            historyItem.correct = 'incorrect';
+          }
+        }
+      });
+      
+      console.log("Quiz history after update:", JSON.stringify(quizHistory));
+      updateQuizHistory();
+
+    } catch (e) {
+        console.error("Grading failed:", e);
+        el.textContent = `评分失败: ${e.message}`;
+        el.className = "result bad";
+        $("#quizPostGradingControls").style.display = "block";
+        return;
+    }
+  }
+
+  const finalScoreText = `测验结束：${engine.correct}/${engine.total}`;
+  $("#quizResult").textContent = finalScoreText;
   $("#quizResult").className = "result";
   
-  // 保存考试历史记录
   const examData = {
     ...currentExamInfo,
     correct: engine.correct,
     total: engine.total,
-    accuracy: Math.round((engine.correct / engine.total) * 100),
+    accuracy: engine.total > 0 ? Math.round((engine.correct / engine.total) * 100) : 0,
     time: new Date().toISOString()
   };
-  
-  console.log("保存考试数据:", examData); // 调试信息
   saveExamHistory(examData);
   refreshExamHistory();
   
-  if (!auto) alert(final);
+  if (!isFuzzyMode && !isAutoEnd) {
+    alert(finalScoreText);
+  }
   
-  // 清理
-  engine = null;
-  currentExamInfo = null;
-  $("#quizPanel").classList.add("hidden");
+  if (!isFuzzyMode) {
+      closeQuizPanel();
+  } else {
+    $("#quizControls").style.display = "none";
+    $("#quizPostGradingControls").style.display = "block";
+  }
+}
+
+function closeQuizPanel() {
+    engine = null;
+    currentExamInfo = null;
+    quizHistory = [];
+    $("#quizPanel").classList.add("hidden");
 }
 
 function switchTab(tabName) {
-  // 移除所有活动状态
   $$(".tab-btn").forEach(btn => btn.classList.remove("active"));
   $$(".tab-panel").forEach(panel => panel.classList.remove("active"));
-  
-  // 激活选中的选项卡
   $(`#tab${tabName}`).classList.add("active");
   $(`#panel${tabName}`).classList.add("active");
 }
@@ -388,30 +455,27 @@ function toggleJsonExample() {
 }
 
 function bindUI() {
-  // 选项卡切换
   $("#tabImage").addEventListener("click", () => switchTab("Image"));
   $("#tabManual").addEventListener("click", () => switchTab("Manual"));
-  
-  // 原有功能
   $("#btnExtract").addEventListener("click", onExtract);
   $("#btnLoadPage").addEventListener("click", onLoadPage);
   $("#btnDeletePage").addEventListener("click", onDeletePage);
-  
-  // 新增功能
   $("#btnParseJson").addEventListener("click", onParseJson);
   $("#btnShowExample").addEventListener("click", toggleJsonExample);
   
-  // 测验功能
   $("#btnQuizSeq").addEventListener("click", ()=>startQuiz("CN_JP_SEQ"));
   $("#btnQuizShuffle").addEventListener("click", ()=>startQuiz("CN_JP_SHUFFLE"));
   $("#btnQuizReading").addEventListener("click", ()=>startQuiz("JP_READING_SHUFFLE"));
   $("#btnQuizFuzzy").addEventListener("click", ()=>startQuiz("JP_CN_FUZZY_SHUFFLE"));
+  
   $("#btnSubmitAnswer").addEventListener("click", ()=>submitAnswer(false));
   $("#btnSkip").addEventListener("click", ()=>submitAnswer(true));
   $("#btnEndQuiz").addEventListener("click", ()=>endQuiz(false));
   $("#quizAnswer").addEventListener("keydown", (e)=>{
     if (e.key === "Enter") submitAnswer(false);
   });
+
+  $("#btnCloseQuiz").addEventListener("click", closeQuizPanel);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
