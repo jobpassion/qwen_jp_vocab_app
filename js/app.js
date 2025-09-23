@@ -1,7 +1,7 @@
 // js/app.js
 import { QwenClient, fileToDataURL } from "./api.js";
 import { savePage, getPage, listPages, deletePage, saveApiConfig, loadApiConfig } from "./storage.js";
-import { extractWordsFromImage } from "./extract.js";
+import { extractWordsFromImage, parseManualJson } from "./extract.js";
 import { QuizEngine } from "./quiz.js";
 
 let client = new QwenClient({});
@@ -62,18 +62,34 @@ function readApiCfgFromUI() {
 
 async function onExtract() {
   readApiCfgFromUI();
-  const page = Number($("#pageNumber").value);
+  // let page = Number($("#pageNumber").value);
   const file = $("#pageImage").files?.[0];
   const status = $("#extractStatus");
-  if (!page || !file) {
-    toastStatus(status, "请填写页码并选择图片");
+  
+  if (!file) {
+    toastStatus(status, "请选择图片");
     return;
   }
+  
   try {
-    status.textContent = "正在调用千问进行结构化提取…";
     const dataURL = await fileToDataURL(file);
-    const items = await extractWordsFromImage(client, page, dataURL);
-    savePage(page, items);
+    
+    // 如果没有输入页码，尝试自动检测
+    // if (!page) {
+    //   status.textContent = "正在检测页码…";
+    //   page = await detectPageNumber(client, dataURL);
+    //   if (!page) {
+    //     toastStatus(status, "无法自动检测页码，请手动输入");
+    //     return;
+    //   }
+    //   $("#pageNumber").value = String(page);
+    //   status.textContent = `检测到页码：${page}，正在进行词汇提取…`;
+    // } else {
+    //   status.textContent = "正在调用千问进行结构化提取…";
+    // }
+    
+    const items = await extractWordsFromImage(client, dataURL);
+    savePage(items.page, items.items);
     renderTable(items);
     refreshSavedPages();
     toastStatus(status, `提取成功，已保存页 ${page}（${items.length} 条）`);
@@ -100,6 +116,36 @@ function onDeletePage() {
     deletePage(page);
     refreshSavedPages();
     $("#wordTable tbody").innerHTML = "";
+  }
+}
+
+function onParseJson() {
+  const page = Number($("#manualPageNumber").value);
+  const jsonText = $("#manualJson").value.trim();
+  const status = $("#parseStatus");
+  
+  try {
+    const result = parseManualJson(jsonText);
+    const items = result.items;
+    
+    if (!items || items.length === 0) {
+      toastStatus(status, "JSON中没有找到有效的词汇数据");
+      return;
+    }
+    
+    // 如果JSON中有页码且与输入的不同，使用JSON中的页码
+    const finalPage = result.page || page;
+    if (result.page && result.page !== page) {
+      $("#manualPageNumber").value = String(finalPage);
+    }
+    
+    savePage(finalPage, items);
+    renderTable(items);
+    refreshSavedPages();
+    toastStatus(status, `解析成功，已保存页 ${finalPage}（${items.length} 条）`);
+  } catch (e) {
+    console.error(e);
+    toastStatus(status, "JSON解析失败：" + e.message);
   }
 }
 
@@ -189,10 +235,44 @@ function endQuiz(auto=false) {
   $("#quizPanel").classList.add("hidden");
 }
 
+function switchTab(tabName) {
+  // 移除所有活动状态
+  $$(".tab-btn").forEach(btn => btn.classList.remove("active"));
+  $$(".tab-panel").forEach(panel => panel.classList.remove("active"));
+  
+  // 激活选中的选项卡
+  $(`#tab${tabName}`).classList.add("active");
+  $(`#panel${tabName}`).classList.add("active");
+}
+
+function toggleJsonExample() {
+  const example = $("#jsonExample");
+  const btn = $("#btnShowExample");
+  
+  if (example.classList.contains("hidden")) {
+    example.classList.remove("hidden");
+    btn.textContent = "隐藏JSON格式示例";
+  } else {
+    example.classList.add("hidden");
+    btn.textContent = "查看JSON格式示例";
+  }
+}
+
 function bindUI() {
+  // 选项卡切换
+  $("#tabImage").addEventListener("click", () => switchTab("Image"));
+  $("#tabManual").addEventListener("click", () => switchTab("Manual"));
+  
+  // 原有功能
   $("#btnExtract").addEventListener("click", onExtract);
   $("#btnLoadPage").addEventListener("click", onLoadPage);
   $("#btnDeletePage").addEventListener("click", onDeletePage);
+  
+  // 新增功能
+  $("#btnParseJson").addEventListener("click", onParseJson);
+  $("#btnShowExample").addEventListener("click", toggleJsonExample);
+  
+  // 测验功能
   $("#btnQuizSeq").addEventListener("click", ()=>startQuiz("CN_JP_SEQ"));
   $("#btnQuizShuffle").addEventListener("click", ()=>startQuiz("CN_JP_SHUFFLE"));
   $("#btnQuizFuzzy").addEventListener("click", ()=>startQuiz("JP_CN_FUZZY_SHUFFLE"));

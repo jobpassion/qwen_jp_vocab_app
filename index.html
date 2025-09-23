@@ -32,18 +32,71 @@
 </section>
 
 <section class="dataset">
-  <h2>页码与图片</h2>
-  <div class="grid">
-    <label>页码
-      <input id="pageNumber" type="number" min="1" step="1" placeholder="例如 520" />
-    </label>
-    <label>上传图片（该页的拍照）
-      <input id="pageImage" type="file" accept="image/*" />
-    </label>
-  </div>
-  <div class="actions">
-    <button id="btnExtract">从图片用千问提取词汇并保存</button>
-    <span id="extractStatus" class="status"></span>
+  <h2>数据输入方式</h2>
+  
+  <!-- 选项卡切换 -->
+  <div class="tab-container">
+    <div class="tab-buttons">
+      <button id="tabImage" class="tab-btn active">图片提取</button>
+      <button id="tabManual" class="tab-btn">手动输入</button>
+    </div>
+    
+    <!-- 图片提取选项卡 -->
+    <div id="panelImage" class="tab-panel active">
+      <div class="grid">
+        <label>页码（可选）
+          <input id="pageNumber" type="number" min="1" step="1" placeholder="留空则自动检测" />
+        </label>
+        <label>上传图片（该页的拍照）
+          <input id="pageImage" type="file" accept="image/*" />
+        </label>
+      </div>
+      <div class="actions">
+        <button id="btnExtract">从图片用千问提取词汇并保存</button>
+        <span id="extractStatus" class="status"></span>
+      </div>
+    </div>
+    
+    <!-- 手动输入选项卡 -->
+    <div id="panelManual" class="tab-panel">
+      <div class="grid">
+        <label>页码
+          <input id="manualPageNumber" type="number" min="1" step="1" placeholder="例如 520" />
+        </label>
+        <label>JSON数据
+          <textarea id="manualJson" placeholder="粘贴JSON格式的词汇数据..." rows="10"></textarea>
+        </label>
+      </div>
+      <div class="actions">
+        <button id="btnParseJson">解析JSON数据并保存</button>
+        <button id="btnShowExample" class="secondary">查看JSON格式示例</button>
+        <span id="parseStatus" class="status"></span>
+      </div>
+      <div id="jsonExample" class="hidden" style="margin-top: 16px; padding: 12px; background: #0f1630; border-radius: 8px; border: 1px solid #2b3a6b;">
+        <h4 style="margin: 0 0 8px; color: var(--muted);">JSON格式示例：</h4>
+        <pre style="margin: 0; color: var(--ink); font-family: ui-monospace, 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace; font-size: 12px; white-space: pre-wrap;">{
+  "page": 520,
+  "items": [
+    {
+      "jp": "勉強",
+      "reading": "べんきょう",
+      "pos": "名・サ変",
+      "cn": "学习",
+      "tag": "普通",
+      "accent": ["0"]
+    },
+    {
+      "jp": "頑張る",
+      "reading": "がんばる",
+      "pos": "動五",
+      "cn": "努力",
+      "tag": "关联",
+      "accent": ["3"]
+    }
+  ]
+}</pre>
+      </div>
+    </div>
   </div>
 
   <div class="grid">

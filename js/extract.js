@@ -2,11 +2,57 @@
 // 使用千问提取：严格只抽取图片中出现的词条（主词+关联/同音/反义/同类），并补充标准音调型
 import { QwenClient } from "./api.js";
 
-export async function extractWordsFromImage(client, pageNumber, imageDataURL) {
+
+// 解析手动输入的JSON数据
+export function parseManualJson(jsonText) {
+  try {
+    const data = JSON.parse(jsonText);
+    
+    if (!data || !Array.isArray(data.items)) {
+      throw new Error("JSON格式错误：缺少items数组");
+    }
+
+    // 归一化 accent 字段为字符串数组
+    const normalizeAccent = (acc) => {
+      if (acc == null) return [];
+      if (Array.isArray(acc)) return acc.map(String).map(s => s.trim()).filter(Boolean);
+      if (typeof acc === "number") return [String(acc)];
+      if (typeof acc === "string") {
+        return acc
+            .split(/[,，\/\s]+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+      }
+      return [];
+    };
+
+    // 清洗：必须包含 jp/pos/cn，reading 可空；tag 默认"普通"；accent 标准化为数组
+    const items = data.items
+        .map((it, i) => ({
+          id: i + 1,
+          jp: (it.jp || "").trim(),
+          reading: (it.reading || "").trim(),
+          pos: (it.pos || "").trim(),
+          cn: (it.cn || "").trim(),
+          tag: (it.tag || "普通").trim(),
+          accent: normalizeAccent(it.accent)
+        }))
+        .filter((x) => x.jp && x.pos && x.cn);
+
+    return {
+      page: data.page || null,
+      items: items
+    };
+  } catch (e) {
+    throw new Error("JSON解析失败：" + e.message);
+  }
+}
+
+export async function extractWordsFromImage(client, imageDataURL) {
   const schemaTip = `
 输出严格 JSON（不要多余文本）：
 {
-  "page": %d,
+  "page": 这里放书籍页码,
   "items": [
     {
       "jp": "日文原词，按书上写法（可能是汉字或假名，严格还原）",
@@ -18,7 +64,7 @@ export async function extractWordsFromImage(client, pageNumber, imageDataURL) {
     }
   ]
 }
-  `.trim().replace("%d", String(pageNumber));
+  `.trim();
 
   const messages = [
     {
@@ -102,5 +148,5 @@ ${schemaTip}
       }))
       .filter((x) => x.jp && x.pos && x.cn);
 
-  return items;
+  return {items, 'page':data.page};
 }
