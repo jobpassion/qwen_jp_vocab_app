@@ -150,6 +150,7 @@ function onParseJson() {
 }
 
 let engine = null;
+let quizHistory = [];
 
 async function startQuiz(mode) {
   const page = Number($("#pageNumber").value);
@@ -184,6 +185,8 @@ async function startQuiz(mode) {
   };
 
   engine = new QuizEngine(items, mode, { judgeFuzzy });
+  quizHistory = []; // 清空答题历史
+  $("#quizHistory").innerHTML = ""; // 清空历史显示
   $("#quizPanel").classList.remove("hidden");
   $("#quizMode").textContent = mode === "CN_JP_SEQ" ? "顺序：问中文→答日文" :
                                mode === "CN_JP_SHUFFLE" ? "乱序：问中文→答日文" :
@@ -206,8 +209,20 @@ function nextQuestion() {
 async function submitAnswer(skip=false) {
   if (!engine) return;
   const ans = skip ? "" : $("#quizAnswer").value.trim();
+  const currentQuestion = engine.currentQuestion();
   const res = await engine.answer(ans);
   const el = $("#quizResult");
+  
+  // 记录答题历史
+  const historyItem = {
+    question: currentQuestion.text,
+    answer: ans || "(跳过)",
+    correct: skip ? "skipped" : res.ok ? "correct" : "incorrect",
+    reason: res.reason || ""
+  };
+  quizHistory.push(historyItem);
+  updateQuizHistory();
+  
   if (skip) {
     el.textContent = "已跳过";
     el.className = "result warn";
@@ -223,6 +238,30 @@ async function submitAnswer(skip=false) {
     if (res.done) endQuiz();
     else nextQuestion();
   }, 600);
+}
+
+function updateQuizHistory() {
+  const historyContainer = $("#quizHistory");
+  historyContainer.innerHTML = "";
+  
+  quizHistory.forEach((item, index) => {
+    const div = document.createElement("div");
+    div.className = `quiz-history-item ${item.correct}`;
+    
+    const resultText = item.correct === "correct" ? "✓" : 
+                      item.correct === "incorrect" ? "✗" : "跳过";
+    
+    div.innerHTML = `
+      <div class="question">${item.question}</div>
+      <div class="answer">${item.answer}</div>
+      <div class="result">${resultText}</div>
+    `;
+    
+    historyContainer.appendChild(div);
+  });
+  
+  // 滚动到底部显示最新记录
+  historyContainer.scrollTop = historyContainer.scrollHeight;
 }
 
 function endQuiz(auto=false) {

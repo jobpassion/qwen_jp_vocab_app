@@ -79,12 +79,136 @@ tbody td {
 }
 
 .quiz-panel.hidden { display: none; }
-.quiz-q { font-size: 18px; margin: 8px 0; }
-.hint { color: var(--muted); }
-.result { margin-top: 6px; min-height: 20px; }
+
+/* 测验面板布局 */
+.quiz-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.quiz-header {
+  text-align: center;
+}
+
+.quiz-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 20px;
+  background: color-mix(in oklab, var(--card), black 8%);
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--card), white 5%);
+}
+
+.quiz-q { 
+  font-size: 20px; 
+  text-align: center;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.hint { 
+  color: var(--muted); 
+  text-align: center;
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+.quiz-a {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.quiz-a input {
+  min-width: 200px;
+  text-align: center;
+  font-size: 16px;
+}
+
+.result { 
+  margin-top: 12px; 
+  min-height: 24px; 
+  text-align: center;
+  font-weight: 500;
+}
+
 .good { color: var(--good); }
 .bad { color: var(--bad); }
 .warn { color: var(--warn); }
+
+/* 答题记录样式 */
+.quiz-results {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.quiz-results h3 {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 16px;
+  text-align: center;
+}
+
+.quiz-history {
+  max-height: 200px;
+  overflow-y: auto;
+  background: color-mix(in oklab, var(--card), black 8%);
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--card), white 5%);
+}
+
+.quiz-history-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px dashed #2b3a6b;
+  font-size: 14px;
+}
+
+.quiz-history-item:last-child {
+  border-bottom: none;
+}
+
+.quiz-history-item .question {
+  flex: 1;
+  color: var(--ink);
+}
+
+.quiz-history-item .answer {
+  flex: 1;
+  color: var(--muted);
+}
+
+.quiz-history-item .result {
+  flex: 0 0 auto;
+  font-weight: 500;
+  min-width: 60px;
+  text-align: center;
+}
+
+.quiz-history-item.correct .result {
+  color: var(--good);
+}
+
+.quiz-history-item.incorrect .result {
+  color: var(--bad);
+}
+
+.quiz-history-item.skipped .result {
+  color: var(--warn);
+}
+
+.quiz-footer {
+  text-align: center;
+}
 
 /* 选项卡样式 */
 .tab-container {
