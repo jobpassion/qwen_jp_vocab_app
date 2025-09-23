@@ -182,6 +182,7 @@ function onParseJson() {
 let engine = null;
 let quizHistory = [];
 let currentExamInfo = null;
+let isSubmitting = false;
 
 async function startQuiz(mode) {
   let page = Number($("#pageNumber").value);
@@ -229,6 +230,7 @@ async function startQuiz(mode) {
 
   engine = new QuizEngine(items, mode, { judgeFuzzyBatch });
   quizHistory = [];
+  isSubmitting = false;
   $("#quizHistory").innerHTML = "";
   
   const typeName = mode === "CN_JP_SEQ" ? "顺序考（问中文→答日文）" :
@@ -247,6 +249,7 @@ async function startQuiz(mode) {
   $("#quizMode").textContent = typeName;
   $("#quizControls").style.display = "block";
   $("#quizPostGradingControls").style.display = "none";
+  
   nextQuestion();
 }
 
@@ -260,10 +263,22 @@ function nextQuestion() {
   $("#quizProgress").textContent = `进度：${engine.index+1}/${engine.total}`;
   $("#quizResult").textContent = "";
   $("#quizResult").className = "result";
+
+  setTimeout(() => {
+    if (engine) {
+        $("#btnSubmitAnswer").disabled = false;
+        $("#btnSkip").disabled = false;
+        isSubmitting = false;
+    }
+  }, 500);
 }
 
 async function submitAnswer(skip = false) {
-    if (!engine) return;
+    if (!engine || isSubmitting) return;
+    isSubmitting = true;
+    
+    $("#btnSubmitAnswer").disabled = true;
+    $("#btnSkip").disabled = true;
 
     const currentQuestion = engine.currentQuestion();
     const originalIndex = engine.index;
@@ -361,6 +376,9 @@ async function endQuiz(isAutoEnd = false) {
 
   if (isFuzzyMode) {
     if (!isAutoEnd && !confirm("确认要提前结束并对已答题目进行评分吗？")) {
+      isSubmitting = false;
+      $("#btnSubmitAnswer").disabled = false;
+      $("#btnSkip").disabled = false;
       return;
     }
 
@@ -407,8 +425,8 @@ async function endQuiz(isAutoEnd = false) {
   
   const examData = {
     ...currentExamInfo,
-    correct: engine.correct,
     total: engine.total,
+    correct: engine.correct,
     accuracy: engine.total > 0 ? Math.round((engine.correct / engine.total) * 100) : 0,
     time: new Date().toISOString()
   };
@@ -431,6 +449,7 @@ function closeQuizPanel() {
     engine = null;
     currentExamInfo = null;
     quizHistory = [];
+    isSubmitting = false;
     $("#quizPanel").classList.add("hidden");
 }
 
@@ -468,11 +487,20 @@ function bindUI() {
   $("#btnQuizReading").addEventListener("click", ()=>startQuiz("JP_READING_SHUFFLE"));
   $("#btnQuizFuzzy").addEventListener("click", ()=>startQuiz("JP_CN_FUZZY_SHUFFLE"));
   
-  $("#btnSubmitAnswer").addEventListener("click", ()=>submitAnswer(false));
-  $("#btnSkip").addEventListener("click", ()=>submitAnswer(true));
+  $("#btnSubmitAnswer").addEventListener("click", () => {
+    if (isSubmitting) return;
+    submitAnswer(false);
+  });
+  $("#btnSkip").addEventListener("click", () => {
+    if (isSubmitting) return;
+    submitAnswer(true);
+  });
   $("#btnEndQuiz").addEventListener("click", ()=>endQuiz(false));
   $("#quizAnswer").addEventListener("keydown", (e)=>{
-    if (e.key === "Enter") submitAnswer(false);
+    if (e.key === "Enter") {
+        if (isSubmitting) return;
+        submitAnswer(false);
+    }
   });
 
   $("#btnCloseQuiz").addEventListener("click", closeQuizPanel);
