@@ -1,6 +1,6 @@
 // js/app.js
 import { QwenClient, fileToDataURL } from "./api.js";
-import { savePage, getPage, listPages, deletePage, saveApiConfig, loadApiConfig } from "./storage.js";
+import { savePage, getPage, listPages, deletePage, saveApiConfig, loadApiConfig, saveExamHistory, getExamHistoryList } from "./storage.js";
 import { extractWordsFromImage, parseManualJson } from "./extract.js";
 import { QuizEngine } from "./quiz.js";
 
@@ -35,6 +35,51 @@ function refreshSavedPages() {
   const sel = $("#savedPages");
   const pages = listPages();
   sel.innerHTML = pages.length ? pages.map(p => `<option value="${p}">${p}</option>`).join("") : `<option value="">（暂无）</option>`;
+}
+
+function refreshExamHistory() {
+  const historyList = $("#examHistoryList");
+  const history = getExamHistoryList();
+  
+  console.log("考试历史记录:", history); // 调试信息
+  
+  if (history.length === 0) {
+    historyList.innerHTML = '<div class="no-history">暂无考试记录</div>';
+    return;
+  }
+  
+  historyList.innerHTML = history.map(item => {
+    const typeClass = item.type.includes('SEQ') ? 'type-seq' : 
+                     item.type.includes('READING') ? 'type-reading' :
+                     item.type.includes('SHUFFLE') ? 'type-shuffle' : 'type-fuzzy';
+    
+    return `
+      <div class="exam-history-item ${typeClass}">
+        <div class="count">${item.count}</div>
+        <div class="page">${item.page}</div>
+        <div class="type">${item.typeName}</div>
+        <div class="result">${item.result}</div>
+        <div class="accuracy ${item.accuracyClass}">${item.accuracy}%</div>
+        <div class="time">${formatTime(item.lastTime)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function formatTime(timeStr) {
+  const date = new Date(timeStr);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  
+  if (diffMins < 1) return '刚刚';
+  if (diffMins < 60) return `${diffMins}分钟前`;
+  if (diffHours < 24) return `${diffHours}小时前`;
+  if (diffDays < 7) return `${diffDays}天前`;
+  
+  return date.toLocaleDateString();
 }
 
 function loadApiCfgToUI() {
@@ -88,11 +133,12 @@ async function onExtract() {
     //   status.textContent = "正在调用千问进行结构化提取…";
     // }
     
-    const items = await extractWordsFromImage(client, dataURL);
-    savePage(items.page, items.items);
-    renderTable(items);
+    const result = await extractWordsFromImage(client, dataURL);
+    savePage(result.page, result.items);
+    $("#pageNumber").value = String(result.page); // 更新页码输入框
+    renderTable(result.items);
     refreshSavedPages();
-    toastStatus(status, `提取成功，已保存页 ${page}（${items.length} 条）`);
+    toastStatus(status, `提取成功，已保存页 ${result.page}（${result.items.length} 条）`);
   } catch (e) {
     console.error(e);
     toastStatus(status, "提取失败：" + e.message);
@@ -151,15 +197,26 @@ function onParseJson() {
 
 let engine = null;
 let quizHistory = [];
+let currentExamInfo = null;
 
 async function startQuiz(mode) {
-  const page = Number($("#pageNumber").value);
+  let page = Number($("#pageNumber").value);
   let items = getPage(page);
-  if (!items || !items.length) {
-    // 如果表格里有内容，也可直接取表格
-    items = getPage(Number($("#savedPages").value)) || [];
+  
+  // 如果页码输入框为空或没有数据，尝试从已保存页面中选择
+  if (!page || !items || !items.length) {
+    const savedPage = Number($("#savedPages").value);
+    if (savedPage) {
+      page = savedPage;
+      items = getPage(savedPage);
+      $("#pageNumber").value = String(savedPage); // 更新页码输入框
+    }
   }
-  if (!items.length) { alert("当前页无词汇数据。请先提取或载入。"); return; }
+  
+  if (!items || !items.length) { 
+    alert("当前页无词汇数据。请先提取或载入。"); 
+    return; 
+  }
 
   const judgeFuzzy = async (goldCN, userCN) => {
     // 调用千问进行模糊判定（仅在 JP→CN 模式使用）
@@ -187,10 +244,22 @@ async function startQuiz(mode) {
   engine = new QuizEngine(items, mode, { judgeFuzzy });
   quizHistory = []; // 清空答题历史
   $("#quizHistory").innerHTML = ""; // 清空历史显示
+  
+  // 记录当前考试信息
+  const typeName = mode === "CN_JP_SEQ" ? "顺序考（问中文→答日文）" :
+                   mode === "CN_JP_SHUFFLE" ? "乱序考（问中文→答日文）" :
+                   mode === "JP_READING_SHUFFLE" ? "乱序考（问日文→答假名读音）" :
+                   "乱序考（问日文→答中文）";
+  
+  currentExamInfo = {
+    page: page,
+    type: mode,
+    typeName: typeName,
+    startTime: new Date().toISOString()
+  };
+  
   $("#quizPanel").classList.remove("hidden");
-  $("#quizMode").textContent = mode === "CN_JP_SEQ" ? "顺序：问中文→答日文" :
-                               mode === "CN_JP_SHUFFLE" ? "乱序：问中文→答日文" :
-                               "乱序：问日文→答中文（模糊判定）";
+  $("#quizMode").textContent = typeName;
   nextQuestion();
 }
 
@@ -265,12 +334,30 @@ function updateQuizHistory() {
 }
 
 function endQuiz(auto=false) {
-  if (!engine) return;
+  if (!engine || !currentExamInfo) return;
+  
   const final = `测验结束：${engine.correct}/${engine.total}`;
   $("#quizResult").textContent = final;
   $("#quizResult").className = "result";
+  
+  // 保存考试历史记录
+  const examData = {
+    ...currentExamInfo,
+    correct: engine.correct,
+    total: engine.total,
+    accuracy: Math.round((engine.correct / engine.total) * 100),
+    time: new Date().toISOString()
+  };
+  
+  console.log("保存考试数据:", examData); // 调试信息
+  saveExamHistory(examData);
+  refreshExamHistory();
+  
   if (!auto) alert(final);
+  
+  // 清理
   engine = null;
+  currentExamInfo = null;
   $("#quizPanel").classList.add("hidden");
 }
 
@@ -314,6 +401,7 @@ function bindUI() {
   // 测验功能
   $("#btnQuizSeq").addEventListener("click", ()=>startQuiz("CN_JP_SEQ"));
   $("#btnQuizShuffle").addEventListener("click", ()=>startQuiz("CN_JP_SHUFFLE"));
+  $("#btnQuizReading").addEventListener("click", ()=>startQuiz("JP_READING_SHUFFLE"));
   $("#btnQuizFuzzy").addEventListener("click", ()=>startQuiz("JP_CN_FUZZY_SHUFFLE"));
   $("#btnSubmitAnswer").addEventListener("click", ()=>submitAnswer(false));
   $("#btnSkip").addEventListener("click", ()=>submitAnswer(true));
@@ -327,4 +415,5 @@ document.addEventListener("DOMContentLoaded", () => {
   bindUI();
   loadApiCfgToUI();
   refreshSavedPages();
+  refreshExamHistory();
 });

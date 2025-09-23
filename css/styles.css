@@ -210,6 +210,134 @@ tbody td {
   text-align: center;
 }
 
+/* 考试历史样式 */
+.exam-history {
+  margin-top: 20px;
+}
+
+.exam-history h3 {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 16px;
+  text-align: center;
+}
+
+.exam-history-list {
+  max-height: 300px;
+  overflow-y: auto;
+  background: color-mix(in oklab, var(--card), black 8%);
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--card), white 5%);
+}
+
+.no-history {
+  padding: 20px;
+  text-align: center;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.exam-history-item {
+  display: grid;
+  grid-template-columns: 60px 1fr 100px 80px 120px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px dashed #2b3a6b;
+  font-size: 14px;
+}
+
+.exam-history-item:last-child {
+  border-bottom: none;
+}
+
+.exam-history-item .page {
+  font-weight: 600;
+  color: var(--accent);
+  text-align: center;
+}
+
+.exam-history-item .type {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.exam-history-item .result {
+  text-align: center;
+  font-weight: 600;
+}
+
+.exam-history-item .accuracy {
+  text-align: center;
+  font-weight: 500;
+}
+
+.exam-history-item .time {
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.exam-history-item .count {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  background: var(--accent);
+  color: white;
+  border-radius: 10px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.exam-history-item {
+  position: relative;
+}
+
+/* 考试类型颜色标识 */
+.exam-history-item.type-seq .type::before {
+  content: "📝 ";
+}
+
+.exam-history-item.type-shuffle .type::before {
+  content: "🔀 ";
+}
+
+.exam-history-item.type-reading .type::before {
+  content: "📖 ";
+}
+
+.exam-history-item.type-fuzzy .type::before {
+  content: "🎯 ";
+}
+
+/* 正确率颜色 */
+.exam-history-item .accuracy.high {
+  color: var(--good);
+}
+
+.exam-history-item .accuracy.medium {
+  color: var(--warn);
+}
+
+.exam-history-item .accuracy.low {
+  color: var(--bad);
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+  .exam-history-item {
+    grid-template-columns: 50px 1fr 80px 60px 100px;
+    gap: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+  
+  .exam-history-item .time {
+    font-size: 11px;
+  }
+}
+
 /* 选项卡样式 */
 .tab-container {
   margin-top: 16px;

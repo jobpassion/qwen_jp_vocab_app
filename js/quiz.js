@@ -4,12 +4,12 @@ import { shuffle } from "./util.js";
 export class QuizEngine {
   constructor(items, mode, { judgeFuzzy } = {}) {
     this.items = items.slice();
-    this.mode = mode; // "CN_JP_SEQ" | "CN_JP_SHUFFLE" | "JP_CN_FUZZY_SHUFFLE"
+    this.mode = mode; // "CN_JP_SEQ" | "CN_JP_SHUFFLE" | "JP_READING_SHUFFLE" | "JP_CN_FUZZY_SHUFFLE"
     this.index = 0;
     this.correct = 0;
     this.total = this.items.length;
     this.judgeFuzzy = judgeFuzzy;
-    if (mode === "CN_JP_SHUFFLE" || mode === "JP_CN_FUZZY_SHUFFLE") {
+    if (mode === "CN_JP_SHUFFLE" || mode === "JP_READING_SHUFFLE" || mode === "JP_CN_FUZZY_SHUFFLE") {
       this.items = shuffle(this.items);
     }
   }
@@ -19,6 +19,8 @@ export class QuizEngine {
     if (!it) return null;
     if (this.mode === "JP_CN_FUZZY_SHUFFLE") {
       return { text: `【日文】${it.jp}　（词性：${it.pos || "—"}）`, hint: it.reading ? `读音：${it.reading}` : "" };
+    } else if (this.mode === "JP_READING_SHUFFLE") {
+      return { text: `【日文】${it.jp}　（词性：${it.pos || "—"}）`, hint: "请输入假名读音" };
     } else {
       return { text: `【中文释义】${it.cn}　（词性：${it.pos || "—"}）`, hint: it.tag ? `标签：${it.tag}` : "" };
     }
@@ -34,6 +36,12 @@ export class QuizEngine {
       const res = await this.judgeFuzzy(it.cn, ans);
       ok = !!res.correct;
       reason = res.reason || "";
+    } else if (this.mode === "JP_READING_SHUFFLE") {
+      // 假名读音判定：比较假名读音
+      const norm = s => (s || "").replace(/\s+/g, "").replace(/[\u3000]/g, "").trim();
+      const expectedReading = it.reading || it.jp; // 如果读音为空，则使用日文本身
+      ok = norm(ans) === norm(expectedReading);
+      reason = ok ? "" : `标准读音：${expectedReading}`;
     } else {
       // 严格（但做些规范化）：期望输入日文
       const norm = s => (s || "").replace(/\s+/g, "").replace(/[\u3000]/g, "").trim();
