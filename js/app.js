@@ -55,12 +55,12 @@ function refreshExamHistory() {
     
     return `
       <div class="exam-history-item ${typeClass}">
-        <div class="count">${item.total}题</div>
-        <div class="page">P. ${item.page}</div>
+        <div class="count">${item.count}</div>
+        <div class="page">${item.page}</div>
         <div class="type">${item.typeName}</div>
-        <div class="result">${item.correct}/${item.total}</div>
+        <div class="result">${item.result}</div>
         <div class="accuracy ${accuracyClass}">${item.accuracy}%</div>
-        <div class="time">${formatTime(item.time)}</div>
+        <div class="time">${formatTime(item.lastTime)}</div>
       </div>
     `;
   }).join('');
