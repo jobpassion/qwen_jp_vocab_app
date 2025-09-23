@@ -320,10 +320,13 @@ function updateQuizHistory() {
     const resultText = item.correct === "correct" ? "✓" : 
                       item.correct === "incorrect" ? "✗" : "跳过";
     
+    const reasonText = item.reason || "";
+
     div.innerHTML = `
       <div class="question">${item.question}</div>
       <div class="answer">${item.answer}</div>
       <div class="result">${resultText}</div>
+      <div class="reason">${reasonText}</div>
     `;
     
     historyContainer.appendChild(div);
