@@ -1,0 +1,81 @@
+
+:root {
+  --bg: #0b1020;
+  --card: #121a33;
+  --ink: #e8ecff;
+  --muted: #9aa6cf;
+  --accent: #4ea1ff;
+  --good: #30d158;
+  --bad: #ff453a;
+  --warn: #ff9f0a;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 24px;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, "Apple Color Emoji","Segoe UI Emoji";
+  color: var(--ink);
+  background: radial-gradient(1200px 600px at 10% -10%, #18234c 0, transparent 60%), var(--bg);
+}
+h1, h2 { margin: 0 0 12px; }
+header, section, footer {
+  background: color-mix(in oklab, var(--card), black 12%);
+  border: 1px solid color-mix(in oklab, var(--card), white 10%);
+  border-radius: 16px;
+  padding: 16px 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+}
+.note { color: var(--muted); margin: 8px 0 0; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+label { display: flex; flex-direction: column; gap: 6px; }
+input[type="text"], input[type="password"], input[type="number"], select, input[type="file"] {
+  background: #0f1630;
+  border: 1px solid #2b3a6b;
+  color: var(--ink);
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+.checkbox { flex-direction: row; align-items: center; gap: 8px; }
+
+.actions, .actions-inline { display: flex; gap: 10px; align-items: center; }
+.actions-inline { margin-top: 8px; }
+
+button {
+  border: 1px solid #2b3a6b;
+  background: linear-gradient(180deg, #1a2450, #121a33);
+  color: var(--ink);
+  padding: 10px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+button.danger { border-color: var(--bad); color: #ffdada; }
+button.secondary { opacity: .8; }
+
+.status { color: var(--muted); }
+
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid #2b3a6b;
+  padding: 8px;
+}
+tbody td {
+  padding: 8px;
+  border-bottom: 1px dashed #2b3a6b;
+}
+
+.quiz-panel.hidden { display: none; }
+.quiz-q { font-size: 18px; margin: 8px 0; }
+.hint { color: var(--muted); }
+.result { margin-top: 6px; min-height: 20px; }
+.good { color: var(--good); }
+.bad { color: var(--bad); }
+.warn { color: var(--warn); }

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>日语红蓝宝书 · 千问提取+测验</title>
+  <link rel="stylesheet" href="./css/styles.css" />
+</head>
+<body>
+<header>
+  <h1>日语红蓝宝书 · 千问提取+测验</h1>
+  <p class="note">⚠️ 直接在浏览器里调用千问 API 会暴露密钥给本机浏览器（保存在本地存储）。仅在你自己的电脑上使用，勿在公共场所或托管环境使用。</p>
+</header>
+
+<section class="config">
+  <h2>API 配置</h2>
+  <div class="grid">
+    <label>API Base
+      <input id="apiBase" type="text" value="https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions" />
+    </label>
+    <label>模型（图像+文本）
+      <input id="apiModel" type="text" value="qwen-vl-max" />
+    </label>
+    <label>API Key
+      <input id="apiKey" type="password" placeholder="sk-..." />
+    </label>
+    <label class="checkbox">
+      <input id="rememberKey" type="checkbox" />
+      记住到本地（localStorage）
+    </label>
+  </div>
+</section>
+
+<section class="dataset">
+  <h2>页码与图片</h2>
+  <div class="grid">
+    <label>页码
+      <input id="pageNumber" type="number" min="1" step="1" placeholder="例如 520" />
+    </label>
+    <label>上传图片（该页的拍照）
+      <input id="pageImage" type="file" accept="image/*" />
+    </label>
+  </div>
+  <div class="actions">
+    <button id="btnExtract">从图片用千问提取词汇并保存</button>
+    <span id="extractStatus" class="status"></span>
+  </div>
+
+  <div class="grid">
+    <label>已保存页码
+      <select id="savedPages"></select>
+    </label>
+    <div class="actions-inline">
+      <button id="btnLoadPage">载入所选页</button>
+      <button id="btnDeletePage" class="danger">删除所选页</button>
+    </div>
+  </div>
+</section>
+
+<section class="words">
+  <h2>本页词汇（仅书上出现的词条/关联/同音/反义）</h2>
+  <table id="wordTable">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>词性</th>
+        <th>日文</th>
+        <th>读音</th>
+        <th>中文释义</th>
+        <th>标签</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</section>
+
+<section class="quiz">
+  <h2>测验</h2>
+  <div class="actions">
+    <button id="btnQuizSeq">1) 顺序考（问中文→答日文，附词性）</button>
+    <button id="btnQuizShuffle">2) 乱序考（问中文→答日文，附词性）</button>
+    <button id="btnQuizFuzzy">3) 乱序考（问日文→答中文，模糊判定）</button>
+  </div>
+
+  <div id="quizPanel" class="quiz-panel hidden">
+    <div class="quiz-row">
+      <div id="quizProgress"></div>
+      <div id="quizMode"></div>
+    </div>
+    <div class="quiz-q">
+      <div id="quizQuestion"></div>
+      <div id="quizHint" class="hint"></div>
+    </div>
+    <div class="quiz-a">
+      <input id="quizAnswer" type="text" placeholder="在此作答…" />
+      <button id="btnSubmitAnswer">提交</button>
+      <button id="btnSkip">跳过</button>
+    </div>
+    <div id="quizResult" class="result"></div>
+    <div class="quiz-row">
+      <button id="btnEndQuiz" class="secondary">结束测验</button>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>Made for your workflow · 数据保存在浏览器本地（localStorage）。</p>
+</footer>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>
