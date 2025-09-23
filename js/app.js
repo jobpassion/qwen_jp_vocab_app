@@ -22,8 +22,8 @@ function renderTable(items) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${idx+1}</td>
-      <td>${it.pos || ""}</td>
       <td>${it.jp}</td>
+      <td>${it.pos || ""}</td>
       <td>${it.reading || ""}</td>
       <td>${it.cn}</td>
       <td>${it.tag || "普通"}</td>
@@ -47,6 +47,9 @@ function refreshExamHistory() {
     return;
   }
   
+  // Sort by page number, ascending
+  history.sort((a, b) => a.page - b.page);
+
   historyList.innerHTML = history.map(item => {
     const accuracyClass = item.accuracy >= 80 ? 'good' : item.accuracy >= 60 ? 'warn' : 'bad';
     const typeClass = item.type.includes('SEQ') ? 'type-seq' :
@@ -56,7 +59,7 @@ function refreshExamHistory() {
     return `
       <div class="exam-history-item ${typeClass}">
         <div class="count">${item.count}</div>
-        <div class="page">${item.page}</div>
+        <div class="page">P. ${item.page}</div>
         <div class="type">${item.typeName}</div>
         <div class="result">${item.result}</div>
         <div class="accuracy ${accuracyClass}">${item.accuracy}%</div>
