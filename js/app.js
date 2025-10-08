@@ -140,6 +140,7 @@ function onLoadPage() {
   const items = getPage(page);
   $("#pageNumber").value = String(page);
   renderTable(items);
+  $("#wordSectionTitle").textContent = `本页词汇 (P. ${page})`;
 }
 
 function onDeletePage() {
@@ -180,6 +181,33 @@ function onParseJson() {
     console.error(e);
     toastStatus(status, "JSON解析失败：" + e.message);
   }
+}
+
+function onSearch() {
+  const query = $("#searchInput").value.trim().toLowerCase();
+  const results = [];
+  
+  if (!query) {
+    renderTable([]);
+    $("#wordSectionTitle").textContent = "本页词汇";
+    return;
+  }
+
+  const pageKeys = listPages();
+  pageKeys.forEach(pageKey => {
+    const items = getPage(pageKey);
+    items.forEach(item => {
+      const jp = (item.jp || "").toLowerCase();
+      const reading = (item.reading || "").toLowerCase();
+      const cn = (item.cn || "").toLowerCase();
+      if (jp.includes(query) || reading.includes(query) || cn.includes(query)) {
+        results.push(item);
+      }
+    });
+  });
+
+  renderTable(results);
+  $("#wordSectionTitle").textContent = `搜索结果：找到 ${results.length} 条`;
 }
 
 let engine = null;
@@ -485,6 +513,13 @@ function bindUI() {
   $("#btnParseJson").addEventListener("click", onParseJson);
   $("#btnShowExample").addEventListener("click", toggleJsonExample);
   
+  // Search
+  $("#btnSearch").addEventListener("click", onSearch);
+  $("#searchInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") onSearch();
+  });
+
+  // Quiz Buttons
   $("#btnQuizSeq").addEventListener("click", ()=>startQuiz("CN_JP_SEQ"));
   $("#btnQuizShuffle").addEventListener("click", ()=>startQuiz("CN_JP_SHUFFLE"));
   $("#btnQuizReading").addEventListener("click", ()=>startQuiz("JP_READING_SHUFFLE"));

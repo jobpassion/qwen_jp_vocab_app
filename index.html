@@ -110,14 +110,22 @@
   </div>
 </section>
 
+<section class="search">
+  <h2>全局搜索</h2>
+  <div class="actions">
+    <input id="searchInput" type="text" placeholder="输入日语、读音或中文释义..." />
+    <button id="btnSearch">搜索</button>
+  </div>
+</section>
+
 <section class="words">
-  <h2>本页词汇（仅书上出现的词条/关联/同音/反义）</h2>
+  <h2 id="wordSectionTitle">本页词汇</h2>
   <table id="wordTable">
     <thead>
       <tr>
         <th>#</th>
-        <th>日文</th>
         <th>词性</th>
+        <th>日文</th>
         <th>读音</th>
         <th>中文释义</th>
         <th>标签</th>
