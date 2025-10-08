@@ -203,7 +203,7 @@ async function startQuiz(mode) {
   }
 
   const judgeFuzzyBatch = async (pairs) => {
-    const prompt = `你是日汉释义判定器。你将收到一个JSON数组，每个对象包含一个标准释义和一个用户答案。请判断每个用户答案是否与标准释义“基本一致/大致正确”，允许同义词和语序差异。你需要返回一个与输入等长的JSON数组，每个对象包含{"correct": true|false, "reason": "一句话理由"}。不要输出任何额外文本。\n\n输入：\n${JSON.stringify(pairs, null, 2)}`;
+    const prompt = `你是日汉释义判定器。你将收到一个JSON数组，每个对象包含一个标准释义和一个用户答案。请判断每个用户答案是否与标准释义“基本一致/大致正确”，允许同义词和语序差异。你需要返回一个与输入等长的JSON数组，每个对象包含{"correct": true|false, "reason": "一句话理由"}。不要输出任何额外文本。请务必检查输出与输入的json等长. \n\n输入：\n${JSON.stringify(pairs, null, 2)}`;
     const messages = [
         { role: "system", content: [{ type: "text", text: "你是一个严格的JSON格式输出助理。" }] },
         { role: "user", content: [{ type: "text", text: prompt }] }
