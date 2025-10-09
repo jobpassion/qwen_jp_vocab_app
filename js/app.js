@@ -15,19 +15,40 @@ function toastStatus(el, text) {
   setTimeout(()=>{ el.textContent=""; }, 3500);
 }
 
-function renderTable(items) {
-  const tbody = $("#wordTable tbody");
+function renderTable(items, options = {}) {
+  const { showPageColumn = false } = options;
+  const table = $("#wordTable");
+  const tbody = table?.querySelector("tbody");
+  const theadRow = table?.querySelector("thead tr");
+  const shouldShowPageColumn = showPageColumn || items.some(it => it.page !== undefined && it.page !== null);
+
+  if (!tbody || !theadRow) return;
+
+  const headers = shouldShowPageColumn
+    ? ["#", "页码", "日文", "词性", "读音", "中文释义", "标签"]
+    : ["#", "日文", "词性", "读音", "中文释义", "标签"];
+
+  theadRow.innerHTML = headers.map(text => `<th>${text}</th>`).join("");
+
   tbody.innerHTML = "";
   items.forEach((it, idx) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${idx+1}</td>
-      <td>${it.jp}</td>
-      <td>${it.pos || ""}</td>
-      <td>${it.reading || ""}</td>
-      <td>${it.cn}</td>
-      <td>${it.tag || "普通"}</td>
-    `;
+    const cells = [`<td>${idx + 1}</td>`];
+
+    if (shouldShowPageColumn) {
+      const pageLabel = it.page != null ? `P. ${it.page}` : "";
+      cells.push(`<td>${pageLabel}</td>`);
+    }
+
+    cells.push(
+      `<td>${it.jp}</td>`,
+      `<td>${it.pos || ""}</td>`,
+      `<td>${it.reading || ""}</td>`,
+      `<td>${it.cn}</td>`,
+      `<td>${it.tag || "普通"}</td>`
+    );
+
+    tr.innerHTML = cells.join("");
     tbody.appendChild(tr);
   });
 }
@@ -201,12 +222,12 @@ function onSearch() {
       const reading = (item.reading || "").toLowerCase();
       const cn = (item.cn || "").toLowerCase();
       if (jp.includes(query) || reading.includes(query) || cn.includes(query)) {
-        results.push(item);
+        results.push({ ...item, page: Number(pageKey) });
       }
     });
   });
 
-  renderTable(results);
+  renderTable(results, { showPageColumn: true });
   $("#wordSectionTitle").textContent = `搜索结果：找到 ${results.length} 条`;
 }
 
@@ -549,4 +570,5 @@ document.addEventListener("DOMContentLoaded", () => {
   loadApiCfgToUI();
   refreshSavedPages();
   refreshExamHistory();
+  renderTable([]);
 });
