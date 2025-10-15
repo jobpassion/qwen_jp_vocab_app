@@ -107,6 +107,13 @@
       <button id="btnLoadPage">载入所选页</button>
       <button id="btnDeletePage" class="danger">删除所选页</button>
     </div>
+    <div id="pdfPreviewSection" class="pdf-preview hidden">
+      <div id="pdfPreviewContainer" class="pdf-preview-container"></div>
+      <span id="pdfPreviewInfo" class="pdf-preview-info"></span>
+    </div>
+    <label>上传参考 PDF
+      <input id="pdfFileInput" type="file" accept="application/pdf" />
+    </label>
   </div>
 </section>
 
@@ -193,6 +200,30 @@
   <p>Made for your workflow · 数据保存在浏览器本地（localStorage）。</p>
 </footer>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.10.111/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.10.111/pdf.worker.min.js";
+  }
+</script>
 <script type="module" src="./js/app.js"></script>
+
+<div id="pdfModal" class="pdf-modal hidden">
+  <div class="pdf-modal-backdrop" data-close-pdf-modal></div>
+  <div class="pdf-modal-content">
+    <button class="pdf-modal-close" data-close-pdf-modal>&times;</button>
+    <div class="pdf-modal-resize-handle pdf-modal-resize-handle-nw" data-resize-corner="nw"></div>
+    <div class="pdf-modal-resize-handle pdf-modal-resize-handle-ne" data-resize-corner="ne"></div>
+    <div class="pdf-modal-resize-handle pdf-modal-resize-handle-sw" data-resize-corner="sw"></div>
+    <div class="pdf-modal-resize-handle pdf-modal-resize-handle-se" data-resize-corner="se"></div>
+    <div id="pdfModalViewer" class="pdf-modal-viewer">
+      <div class="pdf-modal-canvas-wrapper">
+        <canvas id="pdfModalCanvas"></canvas>
+        <div id="pdfModalTextLayer" class="textLayer"></div>
+      </div>
+      <div id="pdfModalLoading" class="pdf-modal-loading hidden">正在加载…</div>
+    </div>
+  </div>
+</div>
 </body>
 </html>

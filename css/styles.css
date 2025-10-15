@@ -65,6 +65,8 @@ button.secondary { opacity: .8; }
 
 .status { color: var(--muted); }
 
+.hidden { display: none !important; }
+
 table { width: 100%; border-collapse: collapse; }
 thead th {
   text-align: left;
@@ -196,6 +198,227 @@ tbody td {
 
 .quiz-history-item.correct .result {
   color: var(--good);
+}
+
+.pdf-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.pdf-preview-info {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pdf-preview-info:empty {
+  display: none;
+}
+
+.pdf-preview-container {
+  min-height: 30px;
+}
+
+.pdf-preview-container.has-thumb {
+  width: 30px;
+}
+
+.pdf-preview-container:not(.has-thumb) {
+  width: auto;
+}
+
+.pdf-preview-message {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 0;
+  display: inline-block;
+}
+
+.pdf-preview-thumb {
+  width: 30px;
+  border-radius: 4px;
+  border: none;
+  overflow: hidden;
+  cursor: pointer;
+  background: transparent;
+  display: block;
+  transition: transform 0.2s ease;
+}
+
+.pdf-preview-thumb img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.pdf-preview-thumb.active {
+  transform: scale(1.05);
+}
+
+.pdf-preview-thumb:hover {
+  transform: scale(1.08);
+}
+
+.page-link,
+.page-preview-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 4px 0 0;
+}
+
+.page-link:hover {
+  text-decoration: underline;
+}
+
+.page-preview-btn {
+  color: var(--muted);
+  padding-left: 2px;
+}
+
+.page-preview-btn:hover {
+  color: var(--accent);
+}
+
+.pdf-modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.pdf-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.pdf-modal-content {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 90%;
+  max-height: 90%;
+  background: #0f1630;
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid #2b3a6b;
+  overflow: auto;
+  cursor: default;
+}
+
+.pdf-modal-viewer {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+}
+
+.pdf-modal-canvas-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.pdf-modal-canvas-wrapper canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  background: #fff;
+  border-radius: 4px;
+}
+
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  opacity: 1;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.textLayer > span {
+  position: absolute;
+  transform-origin: 0 0;
+  white-space: pre;
+  cursor: text;
+  color: transparent;
+  text-shadow: none;
+  pointer-events: all;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.textLayer > span::selection {
+  background: rgba(77, 140, 255, 0.35);
+}
+
+.textLayer > span::-moz-selection {
+  background: rgba(77, 140, 255, 0.35);
+}
+
+.pdf-modal-loading {
+  font-size: 14px;
+  color: var(--muted);
+  width: 100%;
+  text-align: center;
+}
+
+.pdf-modal-resize-handle {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(117, 150, 255, 0.6);
+  background: rgba(17, 27, 52, 0.9);
+  border-radius: 6px;
+  box-shadow: 0 0 6px rgba(35, 82, 210, 0.3);
+  z-index: 5;
+  pointer-events: auto;
+}
+
+.pdf-modal-resize-handle-nw {
+  top: 6px;
+  left: 6px;
+  cursor: nwse-resize;
+}
+
+.pdf-modal-resize-handle-ne {
+  top: 6px;
+  right: 6px;
+  cursor: nesw-resize;
+}
+
+.pdf-modal-resize-handle-sw {
+  bottom: 6px;
+  left: 6px;
+  cursor: nesw-resize;
+}
+
+.pdf-modal-resize-handle-se {
+  bottom: 6px;
+  right: 6px;
+  cursor: nwse-resize;
+}
+
+.pdf-modal-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--ink);
+  cursor: pointer;
+  z-index: 10;
 }
 
 .quiz-history-item.incorrect .result {

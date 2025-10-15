@@ -5,6 +5,12 @@ const PREFIX = "jp_vocab_page_";  // 每个页的 key 前缀
 const KEY_API = "jp_vocab_api_cfg_v1";  // API 配置还是集中存
 const KEY_EXAM_HISTORY = "jp_vocab_exam_history_v1";  // 考试历史记录
 
+const PDF_DB_NAME = "jp_vocab_pdf_store";
+const PDF_DB_VERSION = 1;
+const PDF_STORE_NAME = "pdf_files";
+const PDF_KEY = "current";
+let pdfDbPromise = null;
+
 // 列出所有已保存的页码（按数字大小排序）
 export function listPages() {
   const keys = Object.keys(localStorage);
@@ -31,6 +37,98 @@ export function savePage(page, items) {
 // 删除某一页的数据
 export function deletePage(page) {
   localStorage.removeItem(PREFIX + page);
+}
+
+// -------- PDF 数据（IndexedDB，二进制存储） --------
+
+function openPdfDb() {
+  if (pdfDbPromise) return pdfDbPromise;
+  if (typeof indexedDB === "undefined") {
+    pdfDbPromise = Promise.resolve(null);
+    return pdfDbPromise;
+  }
+
+  pdfDbPromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(PDF_DB_NAME, PDF_DB_VERSION);
+    request.onerror = () => reject(request.error);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(PDF_STORE_NAME)) {
+        db.createObjectStore(PDF_STORE_NAME);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+  });
+
+  return pdfDbPromise;
+}
+
+async function runPdfTransaction(mode, runner) {
+  const db = await openPdfDb();
+  if (!db) throw new Error("IndexedDB 不可用，无法保存 PDF。");
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(PDF_STORE_NAME, mode);
+    const store = tx.objectStore(PDF_STORE_NAME);
+    let result;
+    try {
+      result = runner(store);
+    } catch (err) {
+      reject(err);
+      tx.abort();
+      return;
+    }
+    Promise.resolve(result).then(
+      (value) => {
+        tx.oncomplete = () => resolve(value);
+      },
+      (err) => {
+        reject(err);
+        tx.abort();
+      }
+    );
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+export async function savePdfDataBinary(data) {
+  let bufferToStore;
+  if (data instanceof ArrayBuffer) {
+    bufferToStore = data.slice(0);
+  } else if (ArrayBuffer.isView(data)) {
+    const view = data;
+    bufferToStore = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+  } else {
+    throw new Error("savePdfDataBinary 需要 ArrayBuffer 或 TypedArray 数据");
+  }
+  await runPdfTransaction("readwrite", (store) => {
+    store.put(bufferToStore, PDF_KEY);
+  });
+}
+
+export async function loadPdfDataBinary() {
+  try {
+    return await runPdfTransaction("readonly", (store) =>
+      new Promise((resolve, reject) => {
+        const request = store.get(PDF_KEY);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+      })
+    );
+  } catch (err) {
+    console.warn("加载 PDF 数据失败：", err);
+    return null;
+  }
+}
+
+export async function clearPdfData() {
+  try {
+    await runPdfTransaction("readwrite", (store) => {
+      store.delete(PDF_KEY);
+    });
+  } catch (err) {
+    console.warn("清理 PDF 数据失败：", err);
+  }
 }
 
 // -------- API 配置相关 --------

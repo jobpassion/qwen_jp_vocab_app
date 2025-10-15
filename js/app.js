@@ -1,6 +1,6 @@
 // js/app.js
 import { QwenClient, fileToDataURL } from "./api.js";
-import { savePage, getPage, listPages, deletePage, saveApiConfig, loadApiConfig, saveExamHistory, getExamHistoryList } from "./storage.js";
+import { savePage, getPage, listPages, deletePage, saveApiConfig, loadApiConfig, saveExamHistory, getExamHistoryList, savePdfDataBinary, loadPdfDataBinary } from "./storage.js";
 import { extractWordsFromImage, parseManualJson } from "./extract.js";
 import { QuizEngine } from "./quiz.js";
 
@@ -12,6 +12,21 @@ const $$ = s => document.querySelectorAll(s);
 
 const DEFAULT_STATE = { page: null, search: "" };
 let currentState = { ...DEFAULT_STATE };
+
+let pdfDoc = null;
+let pdfPageCount = 0;
+let pdfData = null;
+let isPdfModalOpen = false;
+let lastPdfPreviewPage = null;
+const pdfRenderCache = new Map();
+const pdfRenderTasks = new Map();
+let pdfModalRenderTask = null;
+let pdfModalTextLayerTask = null;
+const PDF_MODAL_MAX_SCALE = 2.5;
+const PDF_MODAL_MIN_WIDTH = 360;
+const PDF_MODAL_MIN_HEIGHT = 320;
+const PDF_MODAL_MAX_WIDTH_RATIO = 0.95;
+const PDF_MODAL_MAX_HEIGHT_RATIO = 0.95;
 
 function normalizeState(state = {}) {
   const rawSearch = state.search != null ? String(state.search).trim() : "";
@@ -62,6 +77,424 @@ function parseStateFromLocation() {
   return normalizeState({ page: pageParam, search: searchParam });
 }
 
+function setPdfPreviewVisibility(show) {
+  const section = $("#pdfPreviewSection");
+  if (!section) return;
+  section.classList.toggle("hidden", !show);
+}
+
+function setPdfPreviewInfo(text) {
+  const info = $("#pdfPreviewInfo");
+  if (info) info.textContent = text || "";
+}
+
+function setPdfPreviewMessage(text) {
+  const container = $("#pdfPreviewContainer");
+  if (!container) return;
+  container.classList.remove("has-thumb");
+  container.innerHTML = text
+    ? `<div class="pdf-preview-message">${text}</div>`
+    : "";
+}
+
+function resetPdfState() {
+  if (pdfDoc) {
+    pdfDoc.destroy();
+    pdfDoc = null;
+  }
+  pdfPageCount = 0;
+  pdfData = null;
+  pdfRenderCache.clear();
+  pdfRenderTasks.clear();
+}
+
+async function loadPersistedPdf() {
+  if (!window.pdfjsLib) return;
+  const stored = await loadPdfDataBinary();
+  if (!stored) {
+    hidePdfPreview();
+    return;
+  }
+
+  try {
+    let baseBuffer;
+    if (stored instanceof ArrayBuffer) {
+      baseBuffer = stored;
+    } else if (ArrayBuffer.isView(stored)) {
+      const view = stored;
+      baseBuffer = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+    } else {
+      baseBuffer = new Uint8Array(stored).buffer;
+    }
+    const bufferForDoc = baseBuffer.slice(0);
+    const bufferForState = baseBuffer.slice(0);
+    const bytesForDoc = new Uint8Array(bufferForDoc);
+    pdfData = new Uint8Array(bufferForState);
+    pdfDoc = await pdfjsLib.getDocument({ data: bytesForDoc }).promise;
+    pdfPageCount = pdfDoc.numPages;
+    setPdfPreviewVisibility(true);
+    setPdfPreviewInfo(`共 ${pdfPageCount} 页`);
+    setPdfPreviewMessage("");
+  } catch (err) {
+    console.error("恢复 PDF 失败", err);
+    resetPdfState();
+    hidePdfPreview();
+  }
+}
+
+async function renderPdfPageAssets(pageNumber) {
+  if (!pdfDoc) throw new Error("PDF 尚未加载");
+  if (pdfRenderCache.has(pageNumber)) return pdfRenderCache.get(pageNumber);
+  if (pdfRenderTasks.has(pageNumber)) return pdfRenderTasks.get(pageNumber);
+
+  const task = (async () => {
+    const page = await pdfDoc.getPage(pageNumber);
+    const baseViewport = page.getViewport({ scale: 1 });
+
+    try {
+      const makeRender = async (targetWidth) => {
+        const scale = Math.min(targetWidth / baseViewport.width, 2);
+        const viewport = page.getViewport({ scale });
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        const dataURL = canvas.toDataURL("image/png");
+        canvas.width = canvas.height = 0;
+        return dataURL;
+      };
+
+      const thumb = await makeRender(160);
+      const full = await makeRender(900);
+      const assets = { thumb, full };
+      pdfRenderCache.set(pageNumber, assets);
+      pdfRenderTasks.delete(pageNumber);
+      return assets;
+    } finally {
+      page.cleanup();
+    }
+  })().catch(err => {
+    pdfRenderTasks.delete(pageNumber);
+    throw err;
+  });
+
+  pdfRenderTasks.set(pageNumber, task);
+  return task;
+}
+
+async function showPdfPreview(pageNumber) {
+  if (!$("#pdfPreviewSection")) return;
+
+  if (!pageNumber) {
+    setPdfPreviewVisibility(!!pdfDoc);
+    if (pdfDoc) {
+      setPdfPreviewInfo(`共 ${pdfPageCount} 页`);
+      setPdfPreviewMessage("请从已保存页中选择页码。");
+    }
+    return;
+  }
+
+  if (!pdfDoc) {
+    setPdfPreviewVisibility(true);
+    setPdfPreviewInfo("");
+    setPdfPreviewMessage("请先上传参考 PDF 文件。");
+    return;
+  }
+
+  if (pageNumber < 1 || pageNumber > pdfPageCount) {
+    setPdfPreviewVisibility(true);
+    setPdfPreviewInfo(`共 ${pdfPageCount} 页`);
+    setPdfPreviewMessage("PDF 中未找到对应的页码。");
+    return;
+  }
+
+  setPdfPreviewVisibility(true);
+  setPdfPreviewInfo(`第 ${pageNumber} 页 / 共 ${pdfPageCount} 页`);
+  setPdfPreviewMessage("正在渲染预览…");
+
+  try {
+    const assets = await renderPdfPageAssets(pageNumber);
+    const container = $("#pdfPreviewContainer");
+    if (!container) return;
+    container.innerHTML = "";
+    container.classList.add("has-thumb");
+    const wrapper = document.createElement("div");
+    wrapper.className = "pdf-preview-thumb active";
+    const img = document.createElement("img");
+    img.src = assets.thumb;
+    img.alt = `PDF 第 ${pageNumber} 页`;
+    wrapper.appendChild(img);
+    wrapper.addEventListener("click", () => openPdfModal(pageNumber));
+    container.appendChild(wrapper);
+    lastPdfPreviewPage = pageNumber;
+  } catch (err) {
+    console.error("渲染 PDF 预览失败", err);
+    setPdfPreviewMessage("渲染失败，请稍后重试。");
+  }
+}
+
+function hidePdfPreview() {
+  setPdfPreviewVisibility(false);
+  setPdfPreviewInfo("");
+  setPdfPreviewMessage("");
+}
+
+function getPdfModalElements() {
+  const modal = $("#pdfModal");
+  const modalContent = modal?.querySelector(".pdf-modal-content") ?? null;
+  const viewer = $("#pdfModalViewer");
+  return {
+    modal,
+    modalContent,
+    viewer,
+    canvasWrapper: viewer?.querySelector(".pdf-modal-canvas-wrapper") ?? null,
+    canvas: $("#pdfModalCanvas"),
+    textLayer: $("#pdfModalTextLayer"),
+    loading: $("#pdfModalLoading"),
+    handles: modalContent?.querySelectorAll("[data-resize-corner]") ?? null,
+  };
+}
+
+function resetPdfModalViewer() {
+  if (pdfModalRenderTask?.cancel) {
+    try {
+      pdfModalRenderTask.cancel();
+    } catch (_) {
+      // ignore
+    }
+  }
+  if (pdfModalTextLayerTask?.cancel) {
+    try {
+      pdfModalTextLayerTask.cancel();
+    } catch (_) {
+      // ignore
+    }
+  }
+  pdfModalRenderTask = null;
+  pdfModalTextLayerTask = null;
+
+  const { canvas, textLayer, loading, canvasWrapper } = getPdfModalElements();
+  if (canvas) {
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    canvas.width = 0;
+    canvas.height = 0;
+    canvas.style.width = "";
+    canvas.style.height = "";
+  }
+  if (canvasWrapper) {
+    canvasWrapper.style.width = "";
+    canvasWrapper.style.height = "";
+  }
+  if (textLayer) {
+    textLayer.innerHTML = "";
+    textLayer.style.width = "";
+    textLayer.style.height = "";
+  }
+  if (loading) {
+    loading.textContent = "";
+    loading.classList.add("hidden");
+  }
+}
+
+async function renderPdfPageInModal(pageNumber) {
+  if (!pdfDoc) throw new Error("PDF 尚未加载");
+
+  const { viewer, canvasWrapper, canvas, textLayer, loading, modalContent } = getPdfModalElements();
+  if (!viewer || !canvas || !textLayer) return;
+
+  const ctx = canvas.getContext("2d", { alpha: false });
+  if (!ctx) return;
+
+  if (loading) {
+    loading.textContent = "正在加载…";
+    loading.classList.remove("hidden");
+  }
+
+  let page = null;
+  try {
+    page = await pdfDoc.getPage(pageNumber);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const containerWidth = Math.max(
+      viewer.clientWidth || 0,
+      modalContent?.clientWidth || 0,
+      baseViewport.width
+    );
+    const scale = Math.min(
+      PDF_MODAL_MAX_SCALE,
+      Math.max(containerWidth / baseViewport.width, 0.5)
+    );
+    const viewport = page.getViewport({ scale });
+    const outputScale = window.devicePixelRatio || 1;
+
+    if (canvasWrapper) {
+      canvasWrapper.style.width = `${viewport.width}px`;
+      canvasWrapper.style.height = `${viewport.height}px`;
+    }
+
+    canvas.width = viewport.width * outputScale;
+    canvas.height = viewport.height * outputScale;
+    canvas.style.width = `${viewport.width}px`;
+    canvas.style.height = `${viewport.height}px`;
+
+    textLayer.innerHTML = "";
+    textLayer.style.width = `${viewport.width}px`;
+    textLayer.style.height = `${viewport.height}px`;
+
+    ctx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+    ctx.clearRect(0, 0, viewport.width, viewport.height);
+
+    const renderTask = page.render({ canvasContext: ctx, viewport });
+    pdfModalRenderTask = renderTask;
+
+    const textContent = await page.getTextContent();
+    const textLayerTask = pdfjsLib.renderTextLayer({
+      textContent,
+      container: textLayer,
+      viewport,
+      textDivs: [],
+      enhanceTextSelection: true,
+    });
+    pdfModalTextLayerTask = textLayerTask;
+
+    await Promise.all([renderTask.promise, textLayerTask.promise]);
+
+    if (loading) {
+      loading.textContent = "";
+      loading.classList.add("hidden");
+    }
+  } catch (err) {
+    if (err?.name === "RenderingCancelledException") {
+      return;
+    }
+    console.error("渲染 PDF 模态窗口失败", err);
+    if (loading) {
+      loading.textContent = "渲染失败，请重试。";
+      loading.classList.remove("hidden");
+    }
+  } finally {
+    pdfModalRenderTask = null;
+    pdfModalTextLayerTask = null;
+    if (page) {
+      try {
+        page.cleanup();
+      } catch (_) {
+        // ignore
+      }
+    }
+  }
+}
+
+function openPdfModal(pageNumber) {
+  const { modal, modalContent } = getPdfModalElements();
+  if (!modal || !modalContent) return;
+
+  resetPdfModalViewer();
+  modalContent.style.left = "50%";
+  modalContent.style.top = "50%";
+  modalContent.style.transform = "translate(-50%, -50%)";
+  modalContent.style.cursor = "default";
+  modal.classList.remove("hidden");
+  lastPdfPreviewPage = pageNumber;
+  isPdfModalOpen = true;
+
+  renderPdfPageInModal(pageNumber).catch(err => {
+    console.error("渲染 PDF 页面失败", err);
+  });
+}
+
+function closePdfModal() {
+  const { modal, modalContent } = getPdfModalElements();
+  if (!modal || !modalContent || !isPdfModalOpen) return;
+
+  resetPdfModalViewer();
+  modal.classList.add("hidden");
+  modal.classList.remove("dragging");
+  modalContent.style.left = "50%";
+  modalContent.style.top = "50%";
+  modalContent.style.transform = "translate(-50%, -50%)";
+  modalContent.style.cursor = "default";
+  isPdfModalOpen = false;
+}
+
+async function openPdfPreviewForPage(pageNumber) {
+  if (!pdfDoc) {
+    alert("请先上传参考 PDF 文件。");
+    return;
+  }
+  if (pageNumber < 1 || pageNumber > pdfPageCount) {
+    alert("PDF 中没有找到该页码。");
+    return;
+  }
+  try {
+    await renderPdfPageAssets(pageNumber);
+    openPdfModal(pageNumber);
+  } catch (err) {
+    console.error("打开 PDF 预览失败", err);
+    alert("打开 PDF 预览失败，请稍后重试。");
+  }
+}
+
+async function onPdfFileSelected(event) {
+  const input = event.target;
+  const file = input?.files?.[0];
+  if (!file) return;
+
+  if (!window.pdfjsLib) {
+    alert("未能加载 PDF.js，无法预览 PDF。");
+    return;
+  }
+
+  let hasPrevious = false;
+  try {
+    const prev = await loadPdfDataBinary();
+    hasPrevious = !!prev;
+  } catch {
+    hasPrevious = false;
+  }
+  resetPdfState();
+  setPdfPreviewVisibility(true);
+  setPdfPreviewInfo("");
+  setPdfPreviewMessage("正在解析 PDF…");
+
+  try {
+    const originalBuffer = await file.arrayBuffer();
+    const bufferForDoc = originalBuffer.slice(0);
+    const bufferForStore = originalBuffer.slice(0);
+    const bytesForDoc = new Uint8Array(bufferForDoc);
+    const doc = await pdfjsLib.getDocument({ data: bytesForDoc }).promise;
+    pdfDoc = doc;
+    pdfData = new Uint8Array(bufferForStore);
+    pdfPageCount = doc.numPages;
+    try {
+      await savePdfDataBinary(bufferForStore);
+    } catch (storageErr) {
+      console.warn("持久化 PDF 失败：", storageErr);
+    }
+    setPdfPreviewInfo(`共 ${pdfPageCount} 页`);
+    const currentPage = Number($("#pageNumber").value) || Number($("#savedPages").value);
+    if (currentPage) {
+      await showPdfPreview(currentPage);
+    } else {
+      setPdfPreviewMessage("");
+    }
+  } catch (err) {
+    console.error("加载 PDF 失败", err);
+    setPdfPreviewInfo("");
+    setPdfPreviewMessage("PDF 打开失败，请确认文件是否有效。");
+    resetPdfState();
+    if (hasPrevious) {
+      await loadPersistedPdf();
+    }
+  } finally {
+    if (input) input.value = "";
+  }
+}
+
 function toastStatus(el, text) {
   el.textContent = text;
   setTimeout(()=>{ el.textContent=""; }, 3500);
@@ -82,27 +515,67 @@ function renderTable(items, options = {}) {
 
   theadRow.innerHTML = headers.map(text => `<th>${text}</th>`).join("");
 
-  tbody.innerHTML = "";
+    tbody.innerHTML = "";
   items.forEach((it, idx) => {
     const tr = document.createElement("tr");
-    const cells = [`<td>${idx + 1}</td>`];
+    tr.appendChild(createCell(idx + 1));
 
     if (shouldShowPageColumn) {
-      const pageLabel = it.page != null ? `P. ${it.page}` : "";
-      cells.push(`<td>${pageLabel}</td>`);
+      const pageTd = document.createElement("td");
+      if (it.page != null) {
+        const page = Number(it.page);
+        const jumpBtn = document.createElement("button");
+        jumpBtn.type = "button";
+        jumpBtn.className = "page-link";
+        jumpBtn.dataset.page = String(page);
+        jumpBtn.textContent = `P. ${page}`;
+
+        pageTd.appendChild(jumpBtn);
+
+        const previewBtn = document.createElement("button");
+        previewBtn.type = "button";
+        previewBtn.className = "page-preview-btn";
+        previewBtn.dataset.page = String(page);
+        previewBtn.title = "查看 PDF 预览";
+        previewBtn.innerHTML = "🔍";
+
+        pageTd.appendChild(previewBtn);
+      }
+      tr.appendChild(pageTd);
     }
 
-    cells.push(
-      `<td>${it.jp}</td>`,
-      `<td>${it.pos || ""}</td>`,
-      `<td>${it.reading || ""}</td>`,
-      `<td>${it.cn}</td>`,
-      `<td>${it.tag || "普通"}</td>`
-    );
-
-    tr.innerHTML = cells.join("");
+    tr.appendChild(createCell(it.jp));
+    tr.appendChild(createCell(it.pos || ""));
+    tr.appendChild(createCell(it.reading || ""));
+    tr.appendChild(createCell(it.cn));
+    tr.appendChild(createCell(it.tag || "普通"));
     tbody.appendChild(tr);
   });
+}
+
+function createCell(content) {
+  const td = document.createElement("td");
+  td.textContent = content;
+  return td;
+}
+
+function onWordTableClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  if (target.classList.contains("page-link")) {
+    const page = Number(target.dataset.page);
+    if (page) {
+      loadPageByNumber(page);
+    }
+    return;
+  }
+
+  if (target.classList.contains("page-preview-btn")) {
+    const page = Number(target.dataset.page);
+    if (page) {
+      openPdfPreviewForPage(page);
+    }
+  }
 }
 
 function loadPageByNumber(page, { updateHistory = true } = {}) {
@@ -113,6 +586,8 @@ function loadPageByNumber(page, { updateHistory = true } = {}) {
   $("#searchInput").value = "";
   renderTable(items);
   $("#wordSectionTitle").textContent = `本页词汇 (P. ${page})`;
+  showPdfPreview(page);
+  lastPdfPreviewPage = page;
 
   if (updateHistory) {
     setViewState({ page, search: "" });
@@ -129,6 +604,19 @@ function executeSearch(rawQuery, { updateHistory = true } = {}) {
     $("#wordSectionTitle").textContent = "本页词汇";
     if (updateHistory) {
       setViewState(DEFAULT_STATE);
+    }
+    if (pdfDoc) {
+      const page = Number($("#pageNumber").value) || Number($("#savedPages").value);
+      if (page) {
+        showPdfPreview(page);
+        lastPdfPreviewPage = page;
+      } else {
+        showPdfPreview(null);
+        lastPdfPreviewPage = null;
+      }
+    } else {
+      hidePdfPreview();
+      lastPdfPreviewPage = null;
     }
     return;
   }
@@ -155,6 +643,19 @@ function executeSearch(rawQuery, { updateHistory = true } = {}) {
   if (updateHistory) {
     setViewState({ search: query });
   }
+  if (pdfDoc) {
+    const activePage = Number($("#pageNumber").value) || Number($("#savedPages").value);
+    if (activePage) {
+      showPdfPreview(activePage);
+      lastPdfPreviewPage = activePage;
+    } else {
+      showPdfPreview(null);
+      lastPdfPreviewPage = null;
+    }
+  } else {
+    hidePdfPreview();
+    lastPdfPreviewPage = null;
+  }
 }
 
 function applyStateToUI(state) {
@@ -166,6 +667,8 @@ function applyStateToUI(state) {
     if (!loadPageByNumber(state.page, { updateHistory: false })) {
       renderTable([]);
       $("#wordSectionTitle").textContent = "本页词汇";
+      hidePdfPreview();
+      lastPdfPreviewPage = null;
     }
     return;
   }
@@ -174,6 +677,8 @@ function applyStateToUI(state) {
   $("#wordSectionTitle").textContent = "本页词汇";
   $("#savedPages").value = "";
   $("#searchInput").value = "";
+  hidePdfPreview();
+  lastPdfPreviewPage = null;
 }
 
 function refreshSavedPages() {
@@ -270,6 +775,7 @@ async function onExtract() {
     $("#pageNumber").value = String(result.page);
     renderTable(result.items);
     refreshSavedPages();
+    showPdfPreview(result.page);
     toastStatus(status, `提取成功，已保存页 ${result.page}（${result.items.length} 条）`);
   } catch (e) {
     console.error(e);
@@ -292,6 +798,7 @@ function onDeletePage() {
     deletePage(page);
     refreshSavedPages();
     $("#wordTable tbody").innerHTML = "";
+    hidePdfPreview();
   }
 }
 
@@ -317,6 +824,7 @@ function onParseJson() {
     savePage(finalPage, items);
     renderTable(items);
     refreshSavedPages();
+    showPdfPreview(finalPage);
     toastStatus(status, `解析成功，已保存页 ${finalPage}（${items.length} 条）`);
   } catch (e) {
     console.error(e);
@@ -630,6 +1138,360 @@ function bindUI() {
   $("#btnDeletePage").addEventListener("click", onDeletePage);
   $("#btnParseJson").addEventListener("click", onParseJson);
   $("#btnShowExample").addEventListener("click", toggleJsonExample);
+  const pdfInput = $("#pdfFileInput");
+  if (pdfInput) pdfInput.addEventListener("change", onPdfFileSelected);
+  document.querySelectorAll("[data-close-pdf-modal]").forEach(el => {
+    el.addEventListener("click", closePdfModal);
+  });
+  document.addEventListener("keydown", async (e) => {
+    if (e.key !== "Escape") return;
+    if (isPdfModalOpen) {
+      e.preventDefault();
+      closePdfModal();
+      return;
+    }
+    if (lastPdfPreviewPage) {
+      e.preventDefault();
+      try {
+        await renderPdfPageAssets(lastPdfPreviewPage);
+        openPdfModal(lastPdfPreviewPage);
+      } catch (err) {
+        console.error("重新打开 PDF 预览失败", err);
+      }
+    }
+  });
+  const modalElement = $("#pdfModal");
+  const modalContent = modalElement?.querySelector(".pdf-modal-content");
+  if (modalElement && modalContent) {
+    let isDragging = false;
+    let isResizing = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let modalStartLeft = 0;
+    let modalStartTop = 0;
+    let resizeCorner = null;
+    let resizeStart = null;
+    const resizeHandles = modalContent.querySelectorAll("[data-resize-corner]");
+
+    const startDrag = (event) => {
+      if (!modalContent) return;
+      if (isResizing) return;
+      if (event.target.closest?.("[data-resize-corner]")) return;
+
+      const rect = modalContent.getBoundingClientRect();
+      let clientX;
+      let clientY;
+      if (event.type === "mousedown") {
+        clientX = event.clientX;
+        clientY = event.clientY;
+      } else {
+        const touch = event.touches[0];
+        if (!touch) return;
+        clientX = touch.clientX;
+        clientY = touch.clientY;
+      }
+
+      const relativeX = clientX - rect.left;
+      const relativeY = clientY - rect.top;
+      const BORDER_SIZE = 18;
+      const nearEdge =
+        relativeX <= BORDER_SIZE ||
+        relativeY <= BORDER_SIZE ||
+        relativeX >= rect.width - BORDER_SIZE ||
+        relativeY >= rect.height - BORDER_SIZE;
+
+      if (!nearEdge) {
+        return;
+      }
+
+      isDragging = true;
+      modalElement.classList.add("dragging");
+      modalContent.style.cursor = "grabbing";
+      modalStartLeft = rect.left;
+      modalStartTop = rect.top;
+      modalContent.style.transform = "none";
+      modalContent.style.left = `${rect.left}px`;
+      modalContent.style.top = `${rect.top}px`;
+      if (event.type === "mousedown") {
+        dragStartX = clientX;
+        dragStartY = clientY;
+        document.addEventListener("mousemove", onDrag);
+        document.addEventListener("mouseup", endDrag);
+      } else if (event.type === "touchstart") {
+        dragStartX = clientX;
+        dragStartY = clientY;
+        document.addEventListener("touchmove", onDrag, { passive: false });
+        document.addEventListener("touchend", endDrag);
+        document.addEventListener("touchcancel", endDrag);
+      }
+      event.preventDefault();
+    };
+
+    const onDrag = (event) => {
+      if (!isDragging || !modalContent) return;
+      let clientX;
+      let clientY;
+      if (event.type === "mousemove") {
+        clientX = event.clientX;
+        clientY = event.clientY;
+      } else {
+        const touch = event.touches[0];
+        if (!touch) return;
+        clientX = touch.clientX;
+        clientY = touch.clientY;
+      }
+
+      const deltaX = clientX - dragStartX;
+      const deltaY = clientY - dragStartY;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const contentRect = modalContent.getBoundingClientRect();
+      const width = contentRect.width;
+      const height = contentRect.height;
+      const nextLeft = Math.min(Math.max(modalStartLeft + deltaX, 0), Math.max(0, viewportWidth - width));
+      const nextTop = Math.min(Math.max(modalStartTop + deltaY, 0), Math.max(0, viewportHeight - height));
+      modalContent.style.left = `${nextLeft}px`;
+      modalContent.style.top = `${nextTop}px`;
+      modalContent.style.margin = "0";
+      event.preventDefault();
+    };
+
+    const endDrag = () => {
+      if (!isDragging) return;
+      isDragging = false;
+      modalElement.classList.remove("dragging");
+      document.removeEventListener("mousemove", onDrag);
+      document.removeEventListener("mouseup", endDrag);
+      document.removeEventListener("touchmove", onDrag);
+      document.removeEventListener("touchend", endDrag);
+      document.removeEventListener("touchcancel", endDrag);
+      if (modalContent) {
+        modalContent.style.cursor = "default";
+      }
+    };
+
+    const startResize = (event) => {
+      if (!modalContent) return;
+      const target = event.currentTarget ?? event.target;
+      const corner = target?.dataset?.resizeCorner;
+      if (!corner) return;
+
+      let clientX;
+      let clientY;
+      if (event.type === "mousedown") {
+        clientX = event.clientX;
+        clientY = event.clientY;
+      } else {
+        const touch = event.touches[0];
+        if (!touch) return;
+        clientX = touch.clientX;
+        clientY = touch.clientY;
+      }
+
+      const rect = modalContent.getBoundingClientRect();
+      isResizing = true;
+      resizeCorner = corner;
+      resizeStart = {
+        clientX,
+        clientY,
+        width: rect.width,
+        height: rect.height,
+        left: rect.left,
+        top: rect.top,
+      };
+
+      modalElement.classList.add("dragging");
+      modalContent.style.transform = "none";
+      modalContent.style.left = `${rect.left}px`;
+      modalContent.style.top = `${rect.top}px`;
+      modalContent.style.width = `${rect.width}px`;
+      modalContent.style.height = `${rect.height}px`;
+      modalContent.style.margin = "0";
+      const currentCursor = window.getComputedStyle(target).cursor;
+      modalContent.style.cursor = currentCursor || "default";
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.type === "mousedown") {
+        document.addEventListener("mousemove", handleResizeMove);
+        document.addEventListener("mouseup", endResize);
+      } else {
+        document.addEventListener("touchmove", handleResizeMove, { passive: false });
+        document.addEventListener("touchend", endResize);
+        document.addEventListener("touchcancel", endResize);
+      }
+    };
+
+    const handleResizeMove = (event) => {
+      if (!isResizing || !modalContent || !resizeStart || !resizeCorner) return;
+
+      let clientX;
+      let clientY;
+      if (event.type === "mousemove") {
+        clientX = event.clientX;
+        clientY = event.clientY;
+      } else {
+        const touch = event.touches[0];
+        if (!touch) return;
+        clientX = touch.clientX;
+        clientY = touch.clientY;
+      }
+
+      const deltaX = clientX - resizeStart.clientX;
+      const deltaY = clientY - resizeStart.clientY;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const maxWidth = Math.max(PDF_MODAL_MIN_WIDTH, Math.floor(viewportWidth * PDF_MODAL_MAX_WIDTH_RATIO));
+      const maxHeight = Math.max(PDF_MODAL_MIN_HEIGHT, Math.floor(viewportHeight * PDF_MODAL_MAX_HEIGHT_RATIO));
+
+      let newWidth = resizeStart.width;
+      let newHeight = resizeStart.height;
+      let newLeft = resizeStart.left;
+      let newTop = resizeStart.top;
+
+      const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+      switch (resizeCorner) {
+        case "nw": {
+          const widthCandidate = resizeStart.width - deltaX;
+          const heightCandidate = resizeStart.height - deltaY;
+          newWidth = clamp(widthCandidate, PDF_MODAL_MIN_WIDTH, maxWidth);
+          newHeight = clamp(heightCandidate, PDF_MODAL_MIN_HEIGHT, maxHeight);
+          newLeft = resizeStart.left + (resizeStart.width - newWidth);
+          newTop = resizeStart.top + (resizeStart.height - newHeight);
+          break;
+        }
+        case "ne": {
+          const widthCandidate = resizeStart.width + deltaX;
+          const heightCandidate = resizeStart.height - deltaY;
+          newWidth = clamp(widthCandidate, PDF_MODAL_MIN_WIDTH, maxWidth);
+          newHeight = clamp(heightCandidate, PDF_MODAL_MIN_HEIGHT, maxHeight);
+          newTop = resizeStart.top + (resizeStart.height - newHeight);
+          break;
+        }
+        case "sw": {
+          const widthCandidate = resizeStart.width - deltaX;
+          const heightCandidate = resizeStart.height + deltaY;
+          newWidth = clamp(widthCandidate, PDF_MODAL_MIN_WIDTH, maxWidth);
+          newHeight = clamp(heightCandidate, PDF_MODAL_MIN_HEIGHT, maxHeight);
+          newLeft = resizeStart.left + (resizeStart.width - newWidth);
+          break;
+        }
+        case "se": {
+          const widthCandidate = resizeStart.width + deltaX;
+          const heightCandidate = resizeStart.height + deltaY;
+          newWidth = clamp(widthCandidate, PDF_MODAL_MIN_WIDTH, maxWidth);
+          newHeight = clamp(heightCandidate, PDF_MODAL_MIN_HEIGHT, maxHeight);
+          break;
+        }
+        default:
+          break;
+      }
+
+      newWidth = clamp(newWidth, PDF_MODAL_MIN_WIDTH, maxWidth);
+      newHeight = clamp(newHeight, PDF_MODAL_MIN_HEIGHT, maxHeight);
+      newLeft = clamp(newLeft, 0, Math.max(0, viewportWidth - newWidth));
+      newTop = clamp(newTop, 0, Math.max(0, viewportHeight - newHeight));
+
+      modalContent.style.width = `${newWidth}px`;
+      modalContent.style.height = `${newHeight}px`;
+      modalContent.style.left = `${newLeft}px`;
+      modalContent.style.top = `${newTop}px`;
+      modalContent.style.margin = "0";
+      event.preventDefault();
+    };
+
+    const endResize = () => {
+      if (!isResizing) return;
+      isResizing = false;
+      resizeCorner = null;
+      resizeStart = null;
+      modalElement.classList.remove("dragging");
+      document.removeEventListener("mousemove", handleResizeMove);
+      document.removeEventListener("mouseup", endResize);
+      document.removeEventListener("touchmove", handleResizeMove);
+      document.removeEventListener("touchend", endResize);
+      document.removeEventListener("touchcancel", endResize);
+      if (modalContent) {
+        modalContent.style.cursor = "default";
+      }
+      if (isPdfModalOpen && lastPdfPreviewPage) {
+        renderPdfPageInModal(lastPdfPreviewPage).catch(err => {
+          console.error("调整 PDF 模态窗口后重新渲染失败", err);
+        });
+      }
+    };
+
+    if (modalContent) {
+      modalContent.addEventListener("mousedown", startDrag);
+      modalContent.addEventListener("touchstart", startDrag, { passive: false });
+    }
+
+    if (resizeHandles?.length) {
+      resizeHandles.forEach(handle => {
+        handle.addEventListener("mousedown", startResize);
+        handle.addEventListener("touchstart", startResize, { passive: false });
+      });
+    }
+
+    const handleWheel = (event) => {
+      const target = event.target.closest(".pdf-modal-content");
+      if (!target) {
+        return;
+      }
+
+      const { scrollTop, scrollHeight, clientHeight } = target;
+      const atTop = scrollTop === 0;
+      const atBottom = Math.ceil(scrollTop + clientHeight) >= scrollHeight;
+      const goingUp = event.deltaY < 0;
+      const goingDown = event.deltaY > 0;
+
+      if ((atTop && goingUp) || (atBottom && goingDown)) {
+        event.preventDefault();
+      }
+    };
+
+    let lastTouchY = null;
+
+    const handleTouchMove = (event) => {
+      const content = event.target.closest(".pdf-modal-content");
+      if (!content) {
+        lastTouchY = null;
+        return;
+      }
+
+      const touch = event.touches[0];
+      if (!touch) return;
+
+      if (lastTouchY === null) {
+        lastTouchY = touch.clientY;
+        return;
+      }
+
+      const currentY = touch.clientY;
+      const deltaY = lastTouchY - currentY;
+      lastTouchY = currentY;
+
+      const { scrollTop, scrollHeight, clientHeight } = content;
+      const atTop = scrollTop === 0;
+      const atBottom = Math.ceil(scrollTop + clientHeight) >= scrollHeight;
+      const goingDown = deltaY > 0;
+      const goingUp = deltaY < 0;
+
+      if ((atTop && !goingDown) || (atBottom && goingDown)) {
+        event.preventDefault();
+      }
+    };
+
+    const resetTouch = () => {
+      lastTouchY = null;
+    };
+
+    modalElement.addEventListener("wheel", handleWheel, { passive: false });
+    modalElement.addEventListener("touchmove", handleTouchMove, { passive: false });
+    modalElement.addEventListener("touchend", resetTouch);
+    modalElement.addEventListener("touchcancel", resetTouch);
+  }
   
   // Search
   $("#btnSearch").addEventListener("click", onSearch);
@@ -660,6 +1522,10 @@ function bindUI() {
   });
 
   $("#btnCloseQuiz").addEventListener("click", closeQuizPanel);
+  const wordTable = $("#wordTable");
+  if (wordTable) {
+    wordTable.addEventListener("click", onWordTableClick);
+  }
 }
 
 window.addEventListener("popstate", (event) => {
@@ -668,11 +1534,12 @@ window.addEventListener("popstate", (event) => {
   applyStateToUI(state);
 });
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   bindUI();
   loadApiCfgToUI();
   refreshSavedPages();
   refreshExamHistory();
+  await loadPersistedPdf();
   const initialState = parseStateFromLocation();
   currentState = initialState;
   history.replaceState(initialState, "", buildURLFromState(initialState));
