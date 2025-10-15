@@ -10,6 +10,58 @@ let client = new QwenClient({});
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
 
+const DEFAULT_STATE = { page: null, search: "" };
+let currentState = { ...DEFAULT_STATE };
+
+function normalizeState(state = {}) {
+  const rawSearch = state.search != null ? String(state.search).trim() : "";
+  if (rawSearch) {
+    return { page: null, search: rawSearch };
+  }
+
+  const rawPage = state.page;
+  let page = null;
+  if (rawPage !== undefined && rawPage !== null && rawPage !== "") {
+    const parsedPage = Number(rawPage);
+    if (!Number.isNaN(parsedPage) && parsedPage > 0) {
+      page = parsedPage;
+    }
+  }
+  return { page, search: "" };
+}
+
+function statesEqual(a, b) {
+  return a.page === b.page && a.search === b.search;
+}
+
+function buildURLFromState(state) {
+  const params = new URLSearchParams();
+  if (state.page) params.set("page", String(state.page));
+  if (state.search) params.set("search", state.search);
+  const query = params.toString();
+  return `${window.location.pathname}${query ? `?${query}` : ""}`;
+}
+
+function setViewState(nextState, { replace = false } = {}) {
+  const normalized = normalizeState(nextState);
+  const url = buildURLFromState(normalized);
+  const method = replace ? "replaceState" : "pushState";
+
+  if (!replace && statesEqual(normalized, currentState)) {
+    return;
+  }
+
+  history[method](normalized, "", url);
+  currentState = normalized;
+}
+
+function parseStateFromLocation() {
+  const params = new URLSearchParams(window.location.search);
+  const pageParam = params.get("page");
+  const searchParam = params.get("search");
+  return normalizeState({ page: pageParam, search: searchParam });
+}
+
 function toastStatus(el, text) {
   el.textContent = text;
   setTimeout(()=>{ el.textContent=""; }, 3500);
@@ -51,6 +103,77 @@ function renderTable(items, options = {}) {
     tr.innerHTML = cells.join("");
     tbody.appendChild(tr);
   });
+}
+
+function loadPageByNumber(page, { updateHistory = true } = {}) {
+  if (!page) return false;
+  const items = getPage(page) || [];
+  $("#pageNumber").value = String(page);
+  $("#savedPages").value = String(page);
+  $("#searchInput").value = "";
+  renderTable(items);
+  $("#wordSectionTitle").textContent = `本页词汇 (P. ${page})`;
+
+  if (updateHistory) {
+    setViewState({ page, search: "" });
+  }
+  return true;
+}
+
+function executeSearch(rawQuery, { updateHistory = true } = {}) {
+  const query = (rawQuery || "").trim();
+  $("#searchInput").value = query;
+
+  if (!query) {
+    renderTable([]);
+    $("#wordSectionTitle").textContent = "本页词汇";
+    if (updateHistory) {
+      setViewState(DEFAULT_STATE);
+    }
+    return;
+  }
+
+  const compare = query.toLowerCase();
+  const results = [];
+  const pageKeys = listPages();
+
+  pageKeys.forEach(pageKey => {
+    const items = getPage(pageKey);
+    items.forEach(item => {
+      const jp = (item.jp || "").toLowerCase();
+      const reading = (item.reading || "").toLowerCase();
+      const cn = (item.cn || "").toLowerCase();
+      if (jp.includes(compare) || reading.includes(compare) || cn.includes(compare)) {
+        results.push({ ...item, page: Number(pageKey) });
+      }
+    });
+  });
+
+  renderTable(results, { showPageColumn: true });
+  $("#wordSectionTitle").textContent = `搜索结果：找到 ${results.length} 条`;
+
+  if (updateHistory) {
+    setViewState({ search: query });
+  }
+}
+
+function applyStateToUI(state) {
+  if (state.search) {
+    executeSearch(state.search, { updateHistory: false });
+    return;
+  }
+  if (state.page) {
+    if (!loadPageByNumber(state.page, { updateHistory: false })) {
+      renderTable([]);
+      $("#wordSectionTitle").textContent = "本页词汇";
+    }
+    return;
+  }
+
+  renderTable([]);
+  $("#wordSectionTitle").textContent = "本页词汇";
+  $("#savedPages").value = "";
+  $("#searchInput").value = "";
 }
 
 function refreshSavedPages() {
@@ -158,10 +281,7 @@ function onLoadPage() {
   const sel = $("#savedPages");
   const page = Number(sel.value);
   if (!page) return;
-  const items = getPage(page);
-  $("#pageNumber").value = String(page);
-  renderTable(items);
-  $("#wordSectionTitle").textContent = `本页词汇 (P. ${page})`;
+  loadPageByNumber(page);
 }
 
 function onDeletePage() {
@@ -205,30 +325,7 @@ function onParseJson() {
 }
 
 function onSearch() {
-  const query = $("#searchInput").value.trim().toLowerCase();
-  const results = [];
-  
-  if (!query) {
-    renderTable([]);
-    $("#wordSectionTitle").textContent = "本页词汇";
-    return;
-  }
-
-  const pageKeys = listPages();
-  pageKeys.forEach(pageKey => {
-    const items = getPage(pageKey);
-    items.forEach(item => {
-      const jp = (item.jp || "").toLowerCase();
-      const reading = (item.reading || "").toLowerCase();
-      const cn = (item.cn || "").toLowerCase();
-      if (jp.includes(query) || reading.includes(query) || cn.includes(query)) {
-        results.push({ ...item, page: Number(pageKey) });
-      }
-    });
-  });
-
-  renderTable(results, { showPageColumn: true });
-  $("#wordSectionTitle").textContent = `搜索结果：找到 ${results.length} 条`;
+  executeSearch($("#searchInput").value);
 }
 
 let engine = null;
@@ -565,10 +662,19 @@ function bindUI() {
   $("#btnCloseQuiz").addEventListener("click", closeQuizPanel);
 }
 
+window.addEventListener("popstate", (event) => {
+  const state = normalizeState(event.state ?? parseStateFromLocation());
+  currentState = state;
+  applyStateToUI(state);
+});
+
 document.addEventListener("DOMContentLoaded", () => {
   bindUI();
   loadApiCfgToUI();
   refreshSavedPages();
   refreshExamHistory();
-  renderTable([]);
+  const initialState = parseStateFromLocation();
+  currentState = initialState;
+  history.replaceState(initialState, "", buildURLFromState(initialState));
+  applyStateToUI(initialState);
 });
