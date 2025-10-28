@@ -11,6 +11,9 @@ const PDF_STORE_NAME = "pdf_files";
 const PDF_KEY = "current";
 let pdfDbPromise = null;
 
+const BACKUP_FORMAT = "jp_vocab_app_backup";
+const BACKUP_VERSION = 1;
+
 // 列出所有已保存的页码（按数字大小排序）
 export function listPages() {
   const keys = Object.keys(localStorage);
@@ -207,4 +210,143 @@ export function getExamHistoryList() {
   const history = loadExamHistory();
   return Object.values(history)
     .sort((a, b) => new Date(b.lastTime) - new Date(a.lastTime));
+}
+
+function normalizeToArrayBuffer(data) {
+  if (!data) return null;
+  if (data instanceof ArrayBuffer) {
+    return data.slice(0);
+  }
+  if (ArrayBuffer.isView(data)) {
+    const view = data;
+    return view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+  }
+  if (typeof data === "object" && typeof data.byteLength === "number") {
+    try {
+      return new Uint8Array(data).buffer;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const slice = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...slice);
+  }
+  return btoa(binary);
+}
+
+function base64ToUint8Array(base64) {
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+export async function exportAllData() {
+  const pageNumbers = listPages();
+  const pages = pageNumbers.map(page => ({
+    page: Number(page),
+    items: getPage(page),
+  }));
+  const apiConfig = loadApiConfig();
+  const examHistory = loadExamHistory();
+  let pdfSection = null;
+
+  try {
+    const pdfBinary = await loadPdfDataBinary();
+    const pdfBuffer = normalizeToArrayBuffer(pdfBinary);
+    if (pdfBuffer) {
+      pdfSection = {
+        encoding: "base64",
+        data: arrayBufferToBase64(pdfBuffer),
+      };
+    }
+  } catch (err) {
+    console.warn("导出 PDF 数据失败：", err);
+  }
+
+  return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    pages,
+    apiConfig,
+    examHistory,
+    pdf: pdfSection,
+  };
+}
+
+export async function importAllData(snapshot, options = {}) {
+  const { clearExisting = true } = options;
+
+  if (!snapshot || typeof snapshot !== "object") {
+    throw new Error("备份格式无效");
+  }
+  if (snapshot.format !== BACKUP_FORMAT) {
+    throw new Error("备份类型不匹配");
+  }
+  const version = Number(snapshot.version);
+  if (!Number.isFinite(version) || version > BACKUP_VERSION) {
+    throw new Error("备份版本过新，无法导入");
+  }
+
+  const importedPages = [];
+  const pages = Array.isArray(snapshot.pages) ? snapshot.pages : [];
+
+  if (clearExisting) {
+    listPages().forEach(deletePage);
+  }
+
+  for (const entry of pages) {
+    if (!entry || typeof entry !== "object") continue;
+    const pageNumber = Number(entry.page);
+    if (!Number.isFinite(pageNumber) || pageNumber <= 0) continue;
+    const items = Array.isArray(entry.items) ? entry.items : [];
+    savePage(pageNumber, items);
+    importedPages.push(pageNumber);
+  }
+
+  if (snapshot.examHistory && typeof snapshot.examHistory === "object") {
+    localStorage.setItem(KEY_EXAM_HISTORY, JSON.stringify(snapshot.examHistory));
+  } else if (clearExisting) {
+    localStorage.removeItem(KEY_EXAM_HISTORY);
+  }
+
+  if (snapshot.apiConfig && typeof snapshot.apiConfig === "object") {
+    saveApiConfig(snapshot.apiConfig);
+  } else if (clearExisting) {
+    localStorage.removeItem(KEY_API);
+  }
+
+  const pdfInfo = snapshot.pdf;
+  if (pdfInfo && typeof pdfInfo === "object" && pdfInfo.encoding === "base64" && typeof pdfInfo.data === "string") {
+    try {
+      const bytes = base64ToUint8Array(pdfInfo.data);
+      await savePdfDataBinary(bytes);
+    } catch (err) {
+      console.warn("导入 PDF 数据失败：", err);
+      if (clearExisting) {
+        await clearPdfData();
+      }
+    }
+  } else if (clearExisting) {
+    await clearPdfData();
+  }
+
+  importedPages.sort((a, b) => a - b);
+
+  return {
+    pages: importedPages,
+    hasPdf: Boolean(pdfInfo && pdfInfo.data),
+  };
 }

@@ -1,6 +1,6 @@
 // js/app.js
 import { QwenClient, fileToDataURL } from "./api.js";
-import { savePage, getPage, listPages, deletePage, saveApiConfig, loadApiConfig, saveExamHistory, getExamHistoryList, savePdfDataBinary, loadPdfDataBinary } from "./storage.js";
+import { savePage, getPage, listPages, deletePage, saveApiConfig, loadApiConfig, saveExamHistory, getExamHistoryList, savePdfDataBinary, loadPdfDataBinary, exportAllData, importAllData } from "./storage.js";
 import { extractWordsFromImage, parseManualJson } from "./extract.js";
 import { QuizEngine } from "./quiz.js";
 
@@ -832,6 +832,88 @@ function onParseJson() {
   }
 }
 
+function setBackupStatus(text, timeout = 0) {
+  const status = $("#backupStatus");
+  if (!status) return;
+  status.textContent = text;
+  if (timeout > 0) {
+    setTimeout(() => {
+      if (status.textContent === text) {
+        status.textContent = "";
+      }
+    }, timeout);
+  }
+}
+
+async function onExportBackup() {
+  setBackupStatus("正在导出…");
+  try {
+    const snapshot = await exportAllData();
+    const json = JSON.stringify(snapshot, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `jp_vocab_backup_${timestamp}.json`;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setBackupStatus("导出成功，备份文件已下载。", 4000);
+  } catch (err) {
+    console.error("导出数据失败", err);
+    setBackupStatus(`导出失败：${err.message || err}`, 6000);
+  }
+}
+
+function onTriggerImportBackup(event) {
+  if (event) event.preventDefault();
+  const input = $("#importBackupInput");
+  if (input) {
+    input.click();
+  }
+}
+
+async function onImportBackup(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    setBackupStatus(`正在读取 ${file.name}…`);
+    const content = await file.text();
+    let snapshot;
+    try {
+      snapshot = JSON.parse(content);
+    } catch (err) {
+      throw new Error("备份文件不是有效的 JSON");
+    }
+    if (!confirm(`导入备份会覆盖当前浏览器中的词汇、测验记录与 PDF 缓存。\n\n是否继续导入文件 “${file.name}”？`)) {
+      setBackupStatus("已取消导入。", 3000);
+      return;
+    }
+    setBackupStatus("正在导入数据…");
+    const result = await importAllData(snapshot, { clearExisting: true });
+    loadApiCfgToUI();
+    refreshSavedPages();
+    refreshExamHistory();
+    resetPdfState();
+    await loadPersistedPdf();
+    const nextPage = result.pages?.[0] ?? null;
+    const nextState = nextPage ? { page: nextPage } : { page: null, search: "" };
+    const normalized = normalizeState(nextState);
+    setViewState(normalized, { replace: true });
+    applyStateToUI(normalized);
+    const detail = result.pages?.length ? `共导入 ${result.pages.length} 个页码${result.hasPdf ? "，含 PDF 缓存" : ""}` : (result.hasPdf ? "仅导入了 PDF 缓存" : "备份为空");
+    setBackupStatus(`导入成功：${detail}。`, 5000);
+  } catch (err) {
+    console.error("导入数据失败", err);
+    setBackupStatus(`导入失败：${err.message || err}`, 7000);
+  } finally {
+    event.target.value = "";
+  }
+}
+
 function onSearch() {
   executeSearch($("#searchInput").value);
 }
@@ -1140,6 +1222,12 @@ function bindUI() {
   $("#btnShowExample").addEventListener("click", toggleJsonExample);
   const pdfInput = $("#pdfFileInput");
   if (pdfInput) pdfInput.addEventListener("change", onPdfFileSelected);
+  const exportBtn = $("#btnExportData");
+  if (exportBtn) exportBtn.addEventListener("click", onExportBackup);
+  const importBtn = $("#btnImportData");
+  if (importBtn) importBtn.addEventListener("click", onTriggerImportBackup);
+  const importInput = $("#importBackupInput");
+  if (importInput) importInput.addEventListener("change", onImportBackup);
   document.querySelectorAll("[data-close-pdf-modal]").forEach(el => {
     el.addEventListener("click", closePdfModal);
   });

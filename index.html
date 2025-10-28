@@ -117,6 +117,18 @@
   </div>
 </section>
 
+<section class="backup">
+  <h2>数据备份</h2>
+  <p class="note">导出文件会包含已保存的词汇、测验记录、API 配置（含密钥）以及 PDF 缓存，请妥善保管。</p>
+  <div class="actions">
+    <button id="btnExportData" type="button">导出全部数据</button>
+    <button id="btnImportData" type="button">导入备份到当前浏览器</button>
+    <input id="importBackupInput" type="file" accept="application/json" class="visually-hidden" />
+    <span id="backupStatus" class="status"></span>
+  </div>
+  <p class="note">提示：导入备份会覆盖当前浏览器中现有的数据。</p>
+</section>
+
 <section class="search">
   <h2>全局搜索</h2>
   <div class="actions">
