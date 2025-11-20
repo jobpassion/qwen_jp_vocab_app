@@ -4,6 +4,7 @@
 const PREFIX = "jp_vocab_page_";  // 每个页的 key 前缀
 const KEY_API = "jp_vocab_api_cfg_v1";  // API 配置还是集中存
 const KEY_EXAM_HISTORY = "jp_vocab_exam_history_v1";  // 考试历史记录
+const KEY_AUTH = "jp_vocab_auth_session_v1"; // 登录会话
 
 const PDF_DB_NAME = "jp_vocab_pdf_store";
 const PDF_DB_VERSION = 1;
@@ -198,6 +199,24 @@ export function loadExamHistory() {
   }
 }
 
+// -------- 登录信息 --------
+export function saveAuthSession(session) {
+  localStorage.setItem(KEY_AUTH, JSON.stringify(session));
+}
+
+export function loadAuthSession() {
+  try {
+    const data = JSON.parse(localStorage.getItem(KEY_AUTH) || "null");
+    return data || null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearAuthSession() {
+  localStorage.removeItem(KEY_AUTH);
+}
+
 // 获取正确率对应的CSS类名
 function getAccuracyClass(accuracy) {
   if (accuracy >= 80) return "high";
@@ -252,7 +271,8 @@ function base64ToUint8Array(base64) {
   return bytes;
 }
 
-export async function exportAllData() {
+export async function exportAllData(options = {}) {
+  const { includePdf = true } = options;
   const pageNumbers = listPages();
   const pages = pageNumbers.map(page => ({
     page: Number(page),
@@ -262,17 +282,19 @@ export async function exportAllData() {
   const examHistory = loadExamHistory();
   let pdfSection = null;
 
-  try {
-    const pdfBinary = await loadPdfDataBinary();
-    const pdfBuffer = normalizeToArrayBuffer(pdfBinary);
-    if (pdfBuffer) {
-      pdfSection = {
-        encoding: "base64",
-        data: arrayBufferToBase64(pdfBuffer),
-      };
+  if (includePdf) {
+    try {
+      const pdfBinary = await loadPdfDataBinary();
+      const pdfBuffer = normalizeToArrayBuffer(pdfBinary);
+      if (pdfBuffer) {
+        pdfSection = {
+          encoding: "base64",
+          data: arrayBufferToBase64(pdfBuffer),
+        };
+      }
+    } catch (err) {
+      console.warn("导出 PDF 数据失败：", err);
     }
-  } catch (err) {
-    console.warn("导出 PDF 数据失败：", err);
   }
 
   return {
@@ -287,7 +309,7 @@ export async function exportAllData() {
 }
 
 export async function importAllData(snapshot, options = {}) {
-  const { clearExisting = true } = options;
+  const { clearExisting = true, preservePdf = false } = options;
 
   if (!snapshot || typeof snapshot !== "object") {
     throw new Error("备份格式无效");
@@ -335,11 +357,11 @@ export async function importAllData(snapshot, options = {}) {
       await savePdfDataBinary(bytes);
     } catch (err) {
       console.warn("导入 PDF 数据失败：", err);
-      if (clearExisting) {
+      if (clearExisting && !preservePdf) {
         await clearPdfData();
       }
     }
-  } else if (clearExisting) {
+  } else if (clearExisting && !preservePdf) {
     await clearPdfData();
   }
 

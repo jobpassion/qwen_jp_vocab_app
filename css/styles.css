@@ -49,6 +49,7 @@ textarea {
 .checkbox { flex-direction: row; align-items: center; gap: 8px; }
 
 .actions, .actions-inline { display: flex; gap: 10px; align-items: center; }
+.actions, .actions-inline { flex-wrap: wrap; }
 .actions-inline { margin-top: 8px; }
 
 button {
@@ -64,6 +65,18 @@ button.danger { border-color: var(--bad); color: #ffdada; }
 button.secondary { opacity: .8; }
 
 .status { color: var(--muted); }
+.sync .status { word-break: break-word; }
+
+.sync .actions input[type="email"],
+.sync .actions input[type="password"] {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.sync .actions #loginInfo,
+.sync .actions #loginStatus {
+  flex: 1 1 100%;
+}
 
 .hidden { display: none !important; }
 .visually-hidden {

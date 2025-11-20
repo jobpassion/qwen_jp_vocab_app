@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Fallbacks allow overriding via exported env vars; defaults match Dockerfile
+      - PORT=${PORT:-8000}
+      - PUBLIC_DIR=${PUBLIC_DIR:-/app/public}
+      - DATABASE_PATH=${DATABASE_PATH:-/app/backend/data/db.sqlite}
+      # Required: must be provided in the shell (no default)
+      - SESSION_SECRET=${SESSION_SECRET:?SESSION_SECRET is required}
+    volumes:
+      - ./backend/data:/app/backend/data
+    restart: unless-stopped

@@ -1,0 +1,12 @@
+.git
+.gitignore
+node_modules
+backend/node_modules
+backend/dist
+backend/data/*.db
+backend/data/*.sqlite*
+backend/data/*.sqlite?-wal
+backend/data/*.sqlite?-shm
+*.iml
+npm-debug.log*
+yarn-error.log*

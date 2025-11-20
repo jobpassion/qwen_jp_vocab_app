@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Qwen JP Vocab">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#4ea1ff"/>
+      <stop offset="100%" stop-color="#8c79ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <path fill="white" d="M140 160c0-14.6 11.4-26 26-26h180c14.6 0 26 11.4 26 26v192c0 14.6-11.4 26-26 26H166c-14.6 0-26-11.4-26-26V160Zm48 40v112h136V200H188Zm48 32h40v48h-40v-48Z"/>
+</svg>

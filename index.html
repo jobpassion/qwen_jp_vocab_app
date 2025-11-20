@@ -3,7 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b1020" />
   <title>日语红蓝宝书 · 千问提取+测验</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./css/styles.css" />
 </head>
 <body>
@@ -117,6 +120,25 @@
   </div>
 </section>
 
+<section class="sync">
+  <h2>账号同步</h2>
+  <div class="actions">
+    <input id="loginEmail" type="email" placeholder="邮箱" autocomplete="username" />
+    <input id="loginPassword" type="password" placeholder="密码" autocomplete="current-password" />
+    <button id="btnLogin" type="button">登录</button>
+    <button id="btnRegister" type="button">注册</button>
+    <button id="btnLogout" type="button" disabled>退出</button>
+    <span id="loginInfo" class="status">未登录</span>
+    <span id="loginStatus" class="status"></span>
+  </div>
+  <div class="actions">
+    <button id="btnSyncPush" type="button" disabled>上传当前浏览器数据到后端</button>
+    <button id="btnSyncPull" type="button" disabled>从后端拉取数据到当前浏览器</button>
+    <span id="syncStatus" class="status"></span>
+  </div>
+  <p class="note">同步仅包含词汇页、测验记录和 API 配置，不包含 PDF 缓存（PDF 保留在本地）。</p>
+</section>
+
 <section class="backup">
   <h2>数据备份</h2>
   <p class="note">导出文件会包含已保存的词汇、测验记录、API 配置（含密钥）以及 PDF 缓存，请妥善保管。</p>
@@ -216,6 +238,15 @@
 <script>
   if (window.pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.10.111/pdf.worker.min.js";
+  }
+</script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("/sw.js").catch(err => {
+        console.warn("Service worker registration failed", err);
+      });
+    });
   }
 </script>
 <script type="module" src="./js/app.js"></script>

@@ -1,11 +1,12 @@
 // js/app.js
 import { QwenClient, fileToDataURL } from "./api.js";
-import { savePage, getPage, listPages, deletePage, saveApiConfig, loadApiConfig, saveExamHistory, getExamHistoryList, savePdfDataBinary, loadPdfDataBinary, exportAllData, importAllData } from "./storage.js";
+import { savePage, getPage, listPages, deletePage, saveApiConfig, loadApiConfig, saveExamHistory, getExamHistoryList, savePdfDataBinary, loadPdfDataBinary, exportAllData, importAllData, saveAuthSession, loadAuthSession, clearAuthSession } from "./storage.js";
 import { extractWordsFromImage, parseManualJson } from "./extract.js";
 import { QuizEngine } from "./quiz.js";
 
 const SKIPPED_ANSWER = "__SKIPPED__";
 let client = new QwenClient({});
+let authSession = null;
 
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
@@ -658,6 +659,215 @@ function executeSearch(rawQuery, { updateHistory = true } = {}) {
   }
 }
 
+function setLoginStatus(text, timeout = 0) {
+  const status = $("#loginStatus");
+  if (!status) return;
+  status.textContent = text;
+  if (timeout > 0) {
+    setTimeout(() => {
+      if (status.textContent === text) {
+        status.textContent = "";
+      }
+    }, timeout);
+  }
+}
+
+function setSyncStatus(text, timeout = 0) {
+  const status = $("#syncStatus");
+  if (!status) return;
+  status.textContent = text;
+  if (timeout > 0) {
+    setTimeout(() => {
+      if (status.textContent === text) {
+        status.textContent = "";
+      }
+    }, timeout);
+  }
+}
+
+function updateAuthUI() {
+  const info = $("#loginInfo");
+  const emailInput = $("#loginEmail");
+  const pwdInput = $("#loginPassword");
+  const loginBtn = $("#btnLogin");
+  const registerBtn = $("#btnRegister");
+  const logoutBtn = $("#btnLogout");
+  const syncButtons = $$("#btnSyncPush, #btnSyncPull");
+
+  const isLoggedIn = !!authSession?.token;
+  if (info) {
+    info.textContent = isLoggedIn
+      ? `已登录：${authSession.user.email}`
+      : "未登录";
+  }
+  if (emailInput) emailInput.disabled = isLoggedIn;
+  if (pwdInput) pwdInput.disabled = isLoggedIn;
+  if (loginBtn) loginBtn.disabled = isLoggedIn;
+  if (registerBtn) registerBtn.disabled = isLoggedIn;
+  if (logoutBtn) logoutBtn.disabled = !isLoggedIn;
+  syncButtons.forEach(btn => btn.disabled = !isLoggedIn);
+}
+
+function readAuthFromStorage() {
+  authSession = loadAuthSession();
+  updateAuthUI();
+}
+
+async function onLogin(event) {
+  event?.preventDefault();
+  const email = $("#loginEmail").value.trim();
+  const password = $("#loginPassword").value;
+  if (!email || !password) {
+    setLoginStatus("请输入邮箱和密码");
+    return;
+  }
+  setLoginStatus("正在登录…");
+  try {
+    const res = await fetch("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error || `登录失败 (${res.status})`);
+    }
+    const data = await res.json();
+    authSession = data;
+    saveAuthSession(data);
+    setLoginStatus("登录成功", 3000);
+    updateAuthUI();
+    $("#loginPassword").value = "";
+  } catch (err) {
+    console.error(err);
+    setLoginStatus(err.message || "登录失败");
+  }
+}
+
+async function onRegister(event) {
+  event?.preventDefault();
+  const email = $("#loginEmail").value.trim();
+  const password = $("#loginPassword").value;
+  if (!email || !password) {
+    setLoginStatus("请输入邮箱和密码");
+    return;
+  }
+  setLoginStatus("正在注册…");
+  try {
+    const res = await fetch("/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const message = body?.error || (res.status === 409 ? "邮箱已被注册" : `注册失败 (${res.status})`);
+      throw new Error(message);
+    }
+    setLoginStatus("注册成功，正在登录…");
+    await onLogin();
+  } catch (err) {
+    console.error(err);
+    setLoginStatus(err.message || "注册失败");
+  }
+}
+
+async function onLogout() {
+  if (!authSession?.token) {
+    clearAuthSession();
+    authSession = null;
+    updateAuthUI();
+    return;
+  }
+  try {
+    await fetch("/auth/logout", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${authSession.token}` },
+    });
+  } catch (err) {
+    console.warn("退出登录请求失败", err);
+  } finally {
+    clearAuthSession();
+    authSession = null;
+    setLoginStatus("已退出登录", 2000);
+    updateAuthUI();
+  }
+}
+
+async function syncToServer() {
+  if (!authSession?.token) {
+    setSyncStatus("请先登录");
+    return;
+  }
+  setSyncStatus("正在上传本地数据…");
+  try {
+    const snapshot = await exportAllData({ includePdf: false });
+    const res = await fetch("/sync", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authSession.token}`,
+      },
+      body: JSON.stringify(snapshot),
+    });
+    if (res.status === 401) {
+      await onLogout();
+      throw new Error("登录已失效，请重新登录");
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error || `上传失败 (${res.status})`);
+    }
+    setSyncStatus("上传成功", 3500);
+  } catch (err) {
+    console.error(err);
+    setSyncStatus(err.message || "上传失败");
+  }
+}
+
+async function syncFromServer() {
+  if (!authSession?.token) {
+    setSyncStatus("请先登录");
+    return;
+  }
+  setSyncStatus("正在从后端获取数据…");
+  try {
+    const res = await fetch("/sync", {
+      headers: { Authorization: `Bearer ${authSession.token}` },
+    });
+    if (res.status === 401) {
+      await onLogout();
+      throw new Error("登录已失效，请重新登录");
+    }
+    if (res.status === 404) {
+      setSyncStatus("后端暂无同步数据", 3500);
+      return;
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error || `获取失败 (${res.status})`);
+    }
+    const record = await res.json();
+    if (!record?.snapshot) {
+      throw new Error("返回数据不完整");
+    }
+    const result = await importAllData(record.snapshot, { clearExisting: true, preservePdf: true });
+    loadApiCfgToUI();
+    refreshSavedPages();
+    refreshExamHistory();
+    const nextPage = result.pages?.[0] ?? null;
+    const nextState = nextPage ? { page: nextPage } : { page: null, search: "" };
+    const normalized = normalizeState(nextState);
+    setViewState(normalized, { replace: true });
+    applyStateToUI(normalized);
+    const detail = result.pages?.length ? `共同步 ${result.pages.length} 个页码` : "同步完成";
+    setSyncStatus(detail, 5000);
+  } catch (err) {
+    console.error(err);
+    setSyncStatus(err.message || "同步失败");
+  }
+}
+
 function applyStateToUI(state) {
   if (state.search) {
     executeSearch(state.search, { updateHistory: false });
@@ -1228,6 +1438,16 @@ function bindUI() {
   if (importBtn) importBtn.addEventListener("click", onTriggerImportBackup);
   const importInput = $("#importBackupInput");
   if (importInput) importInput.addEventListener("change", onImportBackup);
+  const loginBtn = $("#btnLogin");
+  if (loginBtn) loginBtn.addEventListener("click", onLogin);
+  const registerBtn = $("#btnRegister");
+  if (registerBtn) registerBtn.addEventListener("click", onRegister);
+  const logoutBtn = $("#btnLogout");
+  if (logoutBtn) logoutBtn.addEventListener("click", onLogout);
+  const syncPushBtn = $("#btnSyncPush");
+  if (syncPushBtn) syncPushBtn.addEventListener("click", syncToServer);
+  const syncPullBtn = $("#btnSyncPull");
+  if (syncPullBtn) syncPullBtn.addEventListener("click", syncFromServer);
   document.querySelectorAll("[data-close-pdf-modal]").forEach(el => {
     el.addEventListener("click", closePdfModal);
   });
@@ -1624,6 +1844,7 @@ window.addEventListener("popstate", (event) => {
 
 document.addEventListener("DOMContentLoaded", async () => {
   bindUI();
+  readAuthFromStorage();
   loadApiCfgToUI();
   refreshSavedPages();
   refreshExamHistory();
