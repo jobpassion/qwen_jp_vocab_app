@@ -1,0 +1,19 @@
+# IDE settings
+.idea/
+*.iml
+
+# Environment secrets
+.env
+backend/.env
+
+# Dependency and build outputs
+backend/node_modules/
+backend/dist/
+
+# Runtime data (SQLite DBs, uploads, etc.)
+data/
+backend/data/
+
+# Editor or temporary backup files
+*~
+*.un~
