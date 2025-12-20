@@ -184,6 +184,12 @@ function loadSelectedPage() {
   }
   currentPageNumber = pageNumber;
   currentPageData = data;
+  
+  const jsonInput = $("#jsonInput");
+  if (jsonInput) {
+    jsonInput.value = JSON.stringify(data, null, 2);
+  }
+  
   renderCurrentPage();
 }
 
@@ -224,6 +230,83 @@ function buildMarkedText(container, text, segments) {
     cursor = index + segment.length;
   });
   container.append(document.createTextNode(text.slice(cursor)));
+}
+
+function enterEditMode(li, grammarItem, exampleIndex) {
+  const example = grammarItem.examples[exampleIndex];
+  li.innerHTML = "";
+  
+  const wrapper = document.createElement("div");
+  wrapper.style.cssText = "background: rgba(0,0,0,0.2); padding: 8px; border-radius: 8px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 4px;";
+  
+  const createField = (label, val) => {
+    const lbl = document.createElement("label");
+    lbl.textContent = label;
+    lbl.style.cssText = "font-size: 12px; color: #9aa6cf;";
+    const inp = document.createElement("input");
+    inp.type = "text";
+    inp.value = val;
+    inp.style.width = "100%";
+    return { lbl, inp };
+  };
+
+  const fJp = createField("日文例句", example.jp);
+  const fUl = createField("画线部分 (按出现顺序，逗号分隔)", (example.underline || []).join("，"));
+  const fCn = createField("中文翻译", example.cn);
+  
+  wrapper.append(fJp.lbl, fJp.inp, fUl.lbl, fUl.inp, fCn.lbl, fCn.inp);
+  
+  const actions = document.createElement("div");
+  actions.className = "actions-inline";
+  actions.style.cssText = "justify-content: flex-end; margin-top: 4px;";
+  
+  const btnSave = document.createElement("button");
+  btnSave.textContent = "保存";
+  btnSave.className = "small";
+  btnSave.style.cssText = "padding: 4px 8px; font-size: 13px;";
+  
+  const btnCancel = document.createElement("button");
+  btnCancel.textContent = "取消";
+  btnCancel.className = "small secondary";
+  btnCancel.style.cssText = "padding: 4px 8px; font-size: 13px;";
+  
+  actions.append(btnSave, btnCancel);
+  wrapper.append(actions);
+  li.append(wrapper);
+  
+  fJp.inp.focus();
+  
+  const saveHandler = () => {
+    const newJp = fJp.inp.value.trim();
+    const newUlStr = fUl.inp.value.trim();
+    const newCn = fCn.inp.value.trim();
+    
+    // Split by comma (fullwidth or halfwidth)
+    const newUl = newUlStr.split(/[，,]/).map(s => s.trim()).filter(s => s);
+    
+    // Update Data
+    example.jp = newJp;
+    example.underline = newUl;
+    example.cn = newCn;
+    
+    // Save
+    saveBluebookPage(currentPageData.pageMeta.pageNumber, currentPageData);
+    
+    // Re-render
+    renderCurrentPage();
+  };
+  
+  btnSave.onclick = saveHandler;
+  btnCancel.onclick = () => renderCurrentPage();
+  
+  wrapper.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        saveHandler();
+    }
+    if (e.key === "Escape") {
+        renderCurrentPage();
+    }
+  });
 }
 
 function renderCurrentPage() {
@@ -283,11 +366,22 @@ function renderCurrentPage() {
     } else {
       const list = document.createElement("ol");
       list.className = "example-list";
-      item.examples.forEach(example => {
+      item.examples.forEach((example, exIdx) => {
         const li = document.createElement("li");
         const jp = document.createElement("div");
         jp.className = "example-jp";
-        buildMarkedText(jp, example.jp, example.underline);
+        
+        const jpText = document.createElement("span");
+        buildMarkedText(jpText, example.jp, example.underline);
+        jp.appendChild(jpText);
+
+        const editBtn = document.createElement("span");
+        editBtn.textContent = " ✎";
+        editBtn.style.cssText = "cursor: pointer; font-size: 14px; opacity: 0.5; margin-left: 6px;";
+        editBtn.title = "修改";
+        editBtn.onclick = () => enterEditMode(li, item, exIdx);
+        jp.appendChild(editBtn);
+
         const cn = document.createElement("div");
         cn.className = "example-cn";
         cn.textContent = example.cn || "";
