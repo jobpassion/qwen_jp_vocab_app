@@ -2,6 +2,7 @@
 // 每个页单独一条 localStorage 记录，key 格式：jp_vocab_page_<页码>
 
 const PREFIX = "jp_vocab_page_";  // 每个页的 key 前缀
+const BLUEBOOK_PREFIX = "jp_bluebook_page_"; // 蓝宝书页面 key 前缀
 const KEY_API = "jp_vocab_api_cfg_v1";  // API 配置还是集中存
 const KEY_EXAM_HISTORY = "jp_vocab_exam_history_v1";  // 考试历史记录
 const KEY_AUTH = "jp_vocab_auth_session_v1"; // 登录会话
@@ -22,6 +23,32 @@ export function listPages() {
       .filter(k => k.startsWith(PREFIX))
       .map(k => k.substring(PREFIX.length))
       .sort((a, b) => Number(a) - Number(b));
+}
+
+// -------- 蓝宝书页面数据 --------
+
+export function listBluebookPages() {
+  const keys = Object.keys(localStorage);
+  return keys
+      .filter(k => k.startsWith(BLUEBOOK_PREFIX))
+      .map(k => k.substring(BLUEBOOK_PREFIX.length))
+      .sort((a, b) => Number(a) - Number(b));
+}
+
+export function getBluebookPage(page) {
+  try {
+    return JSON.parse(localStorage.getItem(BLUEBOOK_PREFIX + page) || "null");
+  } catch {
+    return null;
+  }
+}
+
+export function saveBluebookPage(page, data) {
+  localStorage.setItem(BLUEBOOK_PREFIX + page, JSON.stringify(data));
+}
+
+export function deleteBluebookPage(page) {
+  localStorage.removeItem(BLUEBOOK_PREFIX + page);
 }
 
 // 读取某一页的数据（返回数组）

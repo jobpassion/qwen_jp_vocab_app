@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>日语语法蓝宝书 · JSON 解析 + 填空练习</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="./css/styles.css" />
+</head>
+<body>
+<header>
+  <div class="page-title">
+    <div>
+      <h1>日语语法蓝宝书 · JSON 解析 + 填空练习</h1>
+      <p class="note">新站点入口，数据保存在浏览器本地（localStorage），重复导入会覆盖同页码数据。</p>
+    </div>
+    <a class="link-button" href="/index.html">返回红蓝宝书词汇站</a>
+  </div>
+</header>
+
+<section class="prompt">
+  <h2>提示词（发给 ChatGPT 生成 JSON）</h2>
+  <p class="note">把书页图片发给 ChatGPT，并附上以下提示词，要求严格输出 JSON（不要多余说明）。</p>
+  <div class="actions-inline">
+    <button id="btnCopyPrompt">复制提示词</button>
+    <span id="promptStatus" class="status"></span>
+  </div>
+  <pre id="promptTemplate" class="prompt-box"></pre>
+</section>
+
+<section class="import">
+  <h2>粘贴 JSON 并解析</h2>
+  <div class="grid">
+    <label>JSON 数据
+      <textarea id="jsonInput" placeholder="粘贴 ChatGPT 输出的 JSON..." rows="10"></textarea>
+    </label>
+  </div>
+  <div class="actions">
+    <button id="btnParseJson">解析并保存</button>
+    <span id="parseStatus" class="status"></span>
+  </div>
+</section>
+
+<section class="pages">
+  <h2>已保存页码</h2>
+  <div class="grid">
+    <label>页码
+      <select id="savedPages"></select>
+    </label>
+    <div class="actions-inline">
+      <button id="btnLoadPage">载入所选页</button>
+      <button id="btnDeletePage" class="danger">删除所选页</button>
+    </div>
+    <div id="pdfPreviewSection" class="pdf-preview hidden">
+      <div id="pdfPreviewContainer" class="pdf-preview-container"></div>
+      <span id="pdfPreviewInfo" class="pdf-preview-info"></span>
+    </div>
+    <label>上传整本 PDF
+      <input id="pdfFileInput" type="file" accept="application/pdf" />
+    </label>
+  </div>
+</section>
+
+<section class="page-view">
+  <h2>书页内容</h2>
+  <div id="pageMeta" class="page-meta"></div>
+  <div id="grammarList" class="grammar-list"></div>
+</section>
+
+<section class="exam">
+  <h2>填空练习（例文画线部分）</h2>
+  <div class="actions">
+    <button id="btnStartExam">开始练习</button>
+    <button id="btnResetExam" class="secondary">重置练习</button>
+  </div>
+  <div id="examPanel" class="exam-panel hidden">
+    <div class="exam-header">
+      <div id="examProgress"></div>
+      <div id="examSource"></div>
+    </div>
+    <div id="examQuestion" class="exam-question"></div>
+    <div class="actions">
+      <button id="btnSubmitAnswer">提交答案</button>
+      <button id="btnNextQuestion" class="secondary">下一题</button>
+    </div>
+    <div id="examResult" class="result"></div>
+  </div>
+</section>
+
+<footer>
+  <p>Made for your workflow · 数据保存在浏览器本地（localStorage）。</p>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.10.111/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.10.111/pdf.worker.min.js";
+  }
+</script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("/sw.js").catch(err => {
+        console.warn("Service worker registration failed", err);
+      });
+    });
+  }
+</script>
+<script type="module" src="./js/bluebook.js"></script>
+
+<div id="pdfModal" class="pdf-modal hidden">
+  <div class="pdf-modal-backdrop" data-close-pdf-modal></div>
+  <div class="pdf-modal-content">
+    <button class="pdf-modal-close" data-close-pdf-modal>&times;</button>
+    <div class="pdf-modal-resize-handle pdf-modal-resize-handle-nw" data-resize-corner="nw"></div>
+    <div class="pdf-modal-resize-handle pdf-modal-resize-handle-ne" data-resize-corner="ne"></div>
+    <div class="pdf-modal-resize-handle pdf-modal-resize-handle-sw" data-resize-corner="sw"></div>
+    <div class="pdf-modal-resize-handle pdf-modal-resize-handle-se" data-resize-corner="se"></div>
+    <div id="pdfModalViewer" class="pdf-modal-viewer">
+      <div class="pdf-modal-canvas-wrapper">
+        <canvas id="pdfModalCanvas"></canvas>
+        <div id="pdfModalTextLayer" class="textLayer"></div>
+      </div>
+      <div id="pdfModalLoading" class="pdf-modal-loading hidden">正在加载…</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

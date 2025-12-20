@@ -1,9 +1,11 @@
-const CACHE_NAME = "qwen-jp-vocab-v1";
+const CACHE_NAME = "qwen-jp-vocab-v2";
 const STATIC_PATHS = new Set([
   "/",
   "/index.html",
+  "/bluebook.html",
   "/css/styles.css",
   "/js/app.js",
+  "/js/bluebook.js",
   "/js/api.js",
   "/js/extract.js",
   "/js/storage.js",
