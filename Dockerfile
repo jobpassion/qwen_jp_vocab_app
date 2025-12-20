@@ -41,6 +41,7 @@ RUN mkdir -p /app/backend/data
 # Copy static frontend assets that the backend serves
 WORKDIR /app
 COPY index.html /app/public/index.html
+COPY share.html /app/public/share.html
 COPY css /app/public/css
 COPY js /app/public/js
 COPY manifest.webmanifest /app/public/manifest.webmanifest

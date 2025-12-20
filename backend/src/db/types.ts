@@ -30,3 +30,24 @@ export interface SnapshotRow {
   exportedAt: string;
   savedAt: string;
 }
+
+export interface ScoreRecord {
+  id: number;
+  userId: number;
+  title: string;
+  composer: string;
+  description: string;
+  configJson: string;
+  imageFilename: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScoreShareRecord {
+  id: number;
+  userId: number;
+  scoreId: number;
+  token: string;
+  expiresAt: string | null;
+  createdAt: string;
+}

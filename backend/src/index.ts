@@ -16,6 +16,8 @@ const authRouter = require('./routes/authRoutes').default;
 const vocabRouter = require('./routes/vocabRoutes').default;
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const syncRouter = require('./routes/syncRoutes').default;
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const scoreRouter = require('./routes/scoreRoutes').default;
 
 app.use(cors());
 app.use(express.json({ limit: config.jsonBodyLimit }));
@@ -24,10 +26,19 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
+app.use(config.scoreUploadRoute, express.static(config.scoreUploadDir));
 app.use('/auth', authRouter);
 app.use('/vocab', vocabRouter);
 app.use('/sync', syncRouter);
+app.use('/scores', scoreRouter);
 app.use(express.static(config.publicDir));
+app.get('/share/:token', (req, res, next) => {
+  res.sendFile(path.join(config.publicDir, 'share.html'), (err) => {
+    if (err) {
+      next(err);
+    }
+  });
+});
 
 app.use((req, res, next) => {
   const acceptsHtml = typeof req.headers.accept === 'string' && req.headers.accept.includes('text/html');
@@ -35,8 +46,10 @@ app.use((req, res, next) => {
   const isApiRoute = req.path.startsWith('/auth')
     || req.path.startsWith('/vocab')
     || req.path.startsWith('/sync')
+    || req.path.startsWith('/scores')
     || req.path.startsWith('/health');
-  const bypass = isApiRoute || req.path === '/sw.js' || req.path === '/manifest.webmanifest';
+  const isUploadAsset = req.path.startsWith(config.scoreUploadRoute);
+  const bypass = isApiRoute || isUploadAsset || req.path === '/sw.js' || req.path === '/manifest.webmanifest';
 
   // API 请求或静态文件直通；仅对导航请求返回 index.html。
   if (!isHtmlNavigation || bypass) {

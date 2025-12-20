@@ -34,10 +34,36 @@ const statements = [
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`,
+  `CREATE TABLE IF NOT EXISTS scores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    composer TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    config_json TEXT DEFAULT '{}',
+    image_filename TEXT DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS score_shares (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    score_id INTEGER NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    expires_at TEXT DEFAULT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (score_id) REFERENCES scores(id) ON DELETE CASCADE
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`,
   `CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)`,
   `CREATE INDEX IF NOT EXISTS idx_vocab_user ON vocab(user_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_snapshots_user ON snapshots(user_id)`
+  `CREATE INDEX IF NOT EXISTS idx_snapshots_user ON snapshots(user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_scores_user ON scores(user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_score_shares_token ON score_shares(token)`,
+  `CREATE INDEX IF NOT EXISTS idx_score_shares_user ON score_shares(user_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_score_shares_score ON score_shares(score_id)`
 ];
 
 export const initializeDatabase = () => {

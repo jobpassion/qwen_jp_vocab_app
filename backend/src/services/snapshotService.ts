@@ -1,4 +1,6 @@
+import type { Express } from 'express';
 import { getSnapshotByUserId, saveSnapshotForUser } from '../repositories/snapshotRepository';
+import { syncScoresFromSnapshot } from './scoreSyncService';
 
 export const SNAPSHOT_FORMAT = 'jp_vocab_app_backup';
 
@@ -30,6 +32,34 @@ export interface PdfSection {
   data: string;
 }
 
+export interface EncodedImageSection {
+  encoding: 'base64';
+  data: string;
+  mimeType?: string;
+  filename?: string;
+  fileKey?: string;
+}
+
+export interface ScorePageSnapshot {
+  order?: number | undefined;
+  width?: number | undefined;
+  height?: number | undefined;
+  cover?: boolean | undefined;
+  image: EncodedImageSection;
+  // 保留额外的元数据字段，便于向下兼容
+  meta?: Record<string, unknown> | undefined;
+}
+
+export interface ScoreSnapshot {
+  id?: number | undefined;
+  title: string;
+  composer?: string | undefined;
+  description?: string | undefined;
+  config?: Record<string, unknown> | undefined;
+  pages: ScorePageSnapshot[];
+  coverIndex?: number | undefined;
+}
+
 export interface SnapshotPayload {
   format: typeof SNAPSHOT_FORMAT;
   version: number;
@@ -38,6 +68,7 @@ export interface SnapshotPayload {
   apiConfig: ApiConfig;
   examHistory: ExamHistory;
   pdf: PdfSection | null;
+  scores?: ScoreSnapshot[] | undefined;
 }
 
 export interface SnapshotRecord {
@@ -164,6 +195,141 @@ const sanitizePdfSection = (value: unknown): PdfSection | null => {
   };
 };
 
+const sanitizeImageSection = (value: unknown): EncodedImageSection | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const raw = value as Record<string, unknown>;
+
+  if (typeof raw.fileKey === 'string' && raw.fileKey.trim()) {
+    const section: EncodedImageSection = {
+      encoding: 'base64',
+      data: '',
+      fileKey: raw.fileKey.trim(),
+    };
+    if (typeof raw.mimeType === 'string' && raw.mimeType.trim()) {
+      section.mimeType = raw.mimeType.trim();
+    }
+    if (typeof raw.filename === 'string' && raw.filename.trim()) {
+      section.filename = raw.filename.trim();
+    }
+    return section;
+  }
+
+  if (raw.encoding !== 'base64' || typeof raw.data !== 'string' || !raw.data.trim()) {
+    return null;
+  }
+  const section: EncodedImageSection = {
+    encoding: 'base64',
+    data: raw.data.trim(),
+  };
+  if (typeof raw.mimeType === 'string' && raw.mimeType.trim()) {
+    section.mimeType = raw.mimeType.trim();
+  }
+  if (typeof raw.filename === 'string' && raw.filename.trim()) {
+    section.filename = raw.filename.trim();
+  }
+  return section;
+};
+
+const sanitizeScorePage = (value: unknown, index: number): ScorePageSnapshot | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const raw = value as Record<string, unknown>;
+  const image = sanitizeImageSection(raw.image);
+  if (!image) {
+    return null;
+  }
+  const orderRaw = raw.order;
+  const widthRaw = raw.width;
+  const heightRaw = raw.height;
+  const coverRaw = raw.cover;
+
+  const order = Number(orderRaw);
+  const width = Number(widthRaw);
+  const height = Number(heightRaw);
+  const page: ScorePageSnapshot = {
+    order: Number.isFinite(order) ? order : index,
+    width: Number.isFinite(width) ? width : undefined,
+    height: Number.isFinite(height) ? height : undefined,
+    cover: typeof coverRaw === 'boolean' ? coverRaw : undefined,
+    image,
+  };
+
+  const meta: Record<string, unknown> = {};
+  Object.entries(raw).forEach(([key, val]) => {
+    if (['order', 'width', 'height', 'cover', 'image'].includes(key)) {
+      return;
+    }
+    meta[key] = val;
+  });
+  if (Object.keys(meta).length > 0) {
+    page.meta = meta;
+  }
+
+  return page;
+};
+
+const sanitizeScores = (value: unknown): ScoreSnapshot[] | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error('scores 必须是数组');
+  }
+
+  return value
+    .map((entry, index) => {
+      if (!entry || typeof entry !== 'object') {
+        return null;
+      }
+      const raw = entry as Record<string, unknown>;
+      const title = toStringOrEmpty(raw.title);
+      if (!title) {
+        return null;
+      }
+      const composer = toStringOrEmpty(raw.composer);
+      const description = typeof raw.description === 'string' ? raw.description : '';
+      const config = raw.config && typeof raw.config === 'object' ? { ...(raw.config as Record<string, unknown>) } : {};
+      const pagesRaw = Array.isArray(raw.pages) ? raw.pages : [];
+      const pages = pagesRaw
+        .map((page, pageIdx) => sanitizeScorePage(page, pageIdx))
+        .filter((page): page is ScorePageSnapshot => Boolean(page));
+
+      if (pages.length === 0) {
+        return null;
+      }
+
+      const idRaw = raw.id;
+      const id =
+        typeof idRaw === 'number'
+          ? idRaw
+          : typeof idRaw === 'string' && idRaw.trim()
+            ? Number(idRaw)
+            : undefined;
+
+      const coverIndexRaw = raw.coverIndex;
+      const coverIndex =
+        typeof coverIndexRaw === 'number'
+          ? coverIndexRaw
+          : typeof coverIndexRaw === 'string' && coverIndexRaw.trim()
+            ? Number(coverIndexRaw)
+            : undefined;
+
+      return {
+        id: Number.isFinite(id) ? Number(id) : undefined,
+        title,
+        composer,
+        description,
+        config,
+        pages,
+        coverIndex: Number.isFinite(coverIndex) && coverIndex! >= 0 ? Number(coverIndex) : undefined,
+      } as ScoreSnapshot;
+    })
+    .filter((entry): entry is ScoreSnapshot => Boolean(entry));
+};
+
 const sanitizeSnapshot = (payload: unknown): SnapshotPayload => {
   if (!payload || typeof payload !== 'object') {
     throw new Error('同步数据必须是对象');
@@ -190,11 +356,21 @@ const sanitizeSnapshot = (payload: unknown): SnapshotPayload => {
     apiConfig: sanitizeApiConfig(raw.apiConfig),
     examHistory: sanitizeExamHistory(raw.examHistory),
     pdf: sanitizePdfSection(raw.pdf),
+    scores: sanitizeScores(raw.scores),
   };
 };
 
-export const persistSnapshotForUser = (userId: number, payload: unknown): SnapshotRecord => {
+export const persistSnapshotForUser = async (
+  userId: number,
+  payload: unknown,
+  uploadedFiles?: Map<string, Express.Multer.File>
+): Promise<SnapshotRecord> => {
   const snapshot = sanitizeSnapshot(payload);
+
+  if (snapshot.scores !== undefined) {
+    await syncScoresFromSnapshot(userId, snapshot.scores, uploadedFiles);
+  }
+
   const savedAt = new Date().toISOString();
   const row = saveSnapshotForUser(userId, JSON.stringify(snapshot), snapshot.exportedAt, savedAt);
   return {
