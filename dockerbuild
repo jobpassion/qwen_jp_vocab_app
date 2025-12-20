@@ -1,0 +1,2 @@
+docker buildx build   --platform linux/amd64   -t jobpassion/qwen-jp-vocab-app:0.0.10   --push   .
+docker push jobpassion/qwen-jp-vocab-app:0.0.10

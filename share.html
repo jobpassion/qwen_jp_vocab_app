@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>曲谱分享</title>
+  <style>
+    :root {
+      --bg: #f3f0e8;
+      --ink: #1c2a32;
+      --muted: #6f7880;
+      --card: #ffffff;
+      --accent: #0d9c7a;
+      --accent-weak: #cbe8de;
+      --border: #dcd3c5;
+      --shadow: 0 14px 60px rgba(28, 42, 50, 0.16);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'DM Sans', 'Avenir Next', 'PingFang SC', 'Hiragino Sans GB', system-ui, sans-serif;
+      background:
+        radial-gradient(circle at 18% 16%, rgba(13, 156, 122, 0.12), transparent 32%),
+        radial-gradient(circle at 80% 8%, rgba(13, 156, 122, 0.08), transparent 36%),
+        var(--bg);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+    a { color: var(--accent); }
+    .muted { color: var(--muted); }
+    .page-shell {
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 20px 12px 56px;
+    }
+    .hero {
+      background: linear-gradient(120deg, #ffffff, #f7f3ec);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: 22px 18px 18px;
+      position: relative;
+      top: auto;
+      z-index: 1;
+      backdrop-filter: blur(6px);
+      transition: opacity 140ms ease, transform 140ms ease;
+    }
+    .hero.collapsed {
+      display: none;
+    }
+    .hero-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 10px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: var(--accent-weak);
+      color: var(--accent);
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      font-size: 13px;
+    }
+    .share-actions {
+      display: inline-flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      border: 1px solid var(--accent);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-weight: 700;
+      cursor: pointer;
+      color: var(--accent);
+      background: #ffffff;
+      transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    }
+    .btn.primary {
+      background: var(--accent);
+      color: #ffffff;
+      box-shadow: 0 6px 20px rgba(13, 156, 122, 0.25);
+    }
+    .btn.ghost {
+      background: transparent;
+      color: var(--accent);
+      box-shadow: none;
+    }
+    .btn:active { transform: translateY(1px); }
+    h1 {
+      margin: 0 0 4px;
+      font-size: clamp(24px, 3vw, 32px);
+      letter-spacing: 0.2px;
+    }
+    .composer {
+      margin: 0;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .desc {
+      margin: 14px 0 18px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      color: var(--ink);
+    }
+    .meta-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    .meta-item {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .meta-item .value {
+      color: var(--ink);
+      font-weight: 700;
+      font-size: 15px;
+    }
+    .sheet-layout {
+      margin-top: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .info-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px 16px;
+      box-shadow: var(--shadow);
+      position: relative;
+    }
+    .info-panel h3 {
+      margin: 0 0 6px;
+      letter-spacing: 0.2px;
+    }
+    .info-panel p {
+      margin: 6px 0 14px;
+      color: var(--muted);
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+    .link-block {
+      display: grid;
+      gap: 6px;
+      border-top: 1px dashed var(--border);
+      padding-top: 12px;
+      word-break: break-all;
+    }
+    .note {
+      margin-top: 14px;
+      padding: 10px 12px;
+      background: #f8f5ee;
+      border-radius: 12px;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .note[data-error="1"] {
+      border-color: #e27b5b;
+      color: #b03c1c;
+      background: #fff3ed;
+    }
+    .viewer {
+      background: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(253,252,249,0.9));
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: var(--shadow);
+      padding: 12px 10px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      align-items: center;
+    }
+    .page {
+      width: min(1280px, calc(100vw - 64px));
+      background: #fdfbf7;
+      border-radius: 14px;
+      border: 1px solid #e7dece;
+      box-shadow: 0 18px 36px rgba(12, 29, 45, 0.12);
+      overflow: hidden;
+      position: relative;
+    }
+    .page img {
+      width: 100%;
+      display: block;
+      background: #f5f2ea;
+    }
+    .page .badge {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      background: rgba(12, 156, 122, 0.12);
+      color: var(--accent);
+      padding: 6px 10px;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 12px;
+      border: 1px solid var(--accent-weak);
+      backdrop-filter: blur(6px);
+    }
+    .empty {
+      text-align: center;
+      padding: 28px 12px;
+      color: var(--muted);
+    }
+    .info-fab {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      z-index: 2;
+      background: var(--accent);
+      color: #ffffff;
+      border: none;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-weight: 700;
+      box-shadow: 0 10px 30px rgba(13, 156, 122, 0.3);
+      cursor: pointer;
+      display: none;
+    }
+    @media (max-width: 960px) {
+      .sheet-layout {
+        gap: 12px;
+      }
+      .hero { position: static; }
+    }
+    @media (max-width: 600px) {
+      .hero { padding: 18px 14px; }
+      .hero-top { flex-direction: column; align-items: flex-start; }
+      .share-actions { width: 100%; }
+      .share-actions .btn { flex: 1; text-align: center; }
+      .page-shell { padding: 20px 12px 56px; }
+    }
+  </style>
+</head>
+<body>
+  <button class="info-fab" id="info-fab" type="button" aria-label="显示顶部信息">显示信息</button>
+  <div class="page-shell">
+    <header class="hero">
+      <div class="hero-top">
+        <div class="badge">曲谱分享</div>
+        <div class="share-actions">
+          <button class="btn ghost" id="hide-btn" type="button">隐藏信息</button>
+          <button class="btn" id="open-btn" type="button">新窗口打开</button>
+          <button class="btn primary" id="copy-btn" type="button">复制链接</button>
+        </div>
+      </div>
+      <h1 id="title">加载中…</h1>
+      <p class="composer" id="composer"></p>
+      <p class="desc" id="desc"></p>
+      <div class="meta-row">
+        <div class="meta-item">
+          <span>分享状态</span>
+          <span class="value" id="share-status">准备中</span>
+        </div>
+        <div class="meta-item">
+          <span>页数</span>
+          <span class="value" id="page-count">--</span>
+        </div>
+        <div class="meta-item">
+          <span>有效期</span>
+          <span class="value" id="expires">--</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="sheet-layout">
+      <aside class="info-panel">
+        <h3>曲谱说明</h3>
+        <p id="desc-secondary">载入中…</p>
+        <div class="link-block">
+          <span class="muted">分享链接</span>
+          <a id="share-link" href="#" target="_blank" rel="noopener">准备中…</a>
+        </div>
+        <div class="note" id="status"></div>
+      </aside>
+      <section class="viewer" id="pages">
+        <div class="empty">正在加载曲谱…</div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const token = decodeURIComponent((location.pathname.split('/').pop() || '').trim());
+    const apiUrl = `/scores/share/${encodeURIComponent(token)}`;
+    const titleEl = document.getElementById('title');
+    const composerEl = document.getElementById('composer');
+    const descEl = document.getElementById('desc');
+    const descSecondaryEl = document.getElementById('desc-secondary');
+    const pagesEl = document.getElementById('pages');
+    const linkEl = document.getElementById('share-link');
+    const statusEl = document.getElementById('status');
+    const copyBtn = document.getElementById('copy-btn');
+    const openBtn = document.getElementById('open-btn');
+    const hideBtn = document.getElementById('hide-btn');
+    const infoFab = document.getElementById('info-fab');
+    const heroEl = document.querySelector('.hero');
+    const shareStatusEl = document.getElementById('share-status');
+    const pageCountEl = document.getElementById('page-count');
+    const expiresEl = document.getElementById('expires');
+
+    const hideHero = () => {
+      if (heroEl) heroEl.classList.add('collapsed');
+      if (infoFab) infoFab.style.display = 'block';
+    };
+
+    const showHero = () => {
+      if (heroEl) heroEl.classList.remove('collapsed');
+      if (infoFab) infoFab.style.display = 'none';
+    };
+
+    const setStatus = (text, isError = false) => {
+      statusEl.textContent = text || '';
+      statusEl.dataset.error = isError ? '1' : '';
+    };
+
+    const renderPages = (pages) => {
+      pagesEl.innerHTML = '';
+      if (!pages || !pages.length) {
+        pagesEl.innerHTML = '<div class="empty">暂无曲谱图片</div>';
+        return;
+      }
+      pages.forEach((page, idx) => {
+        const div = document.createElement('div');
+        div.className = 'page';
+        div.innerHTML = `
+          <span class="badge">P${(page.order ?? idx) + 1}</span>
+          <img loading="lazy" src="${page.imageUrl}" alt="page ${idx + 1}">
+        `;
+        pagesEl.appendChild(div);
+      });
+    };
+
+    const copyLink = (text) => {
+      if (!text) return;
+      navigator.clipboard?.writeText(text).then(() => {
+        setStatus('链接已复制');
+      }).catch(() => {
+        setStatus('复制失败，请手动复制', true);
+      });
+    };
+
+    const formatDate = (value) => {
+      if (!value) return '未设置';
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? '未知' : date.toLocaleString('zh-CN');
+    };
+
+    hideBtn?.addEventListener('click', hideHero);
+    infoFab?.addEventListener('click', showHero);
+    // Ensure initial state hides the floating button.
+    showHero();
+
+    fetch(apiUrl)
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          const msg = body.error || `加载失败 (${res.status})`;
+          throw new Error(msg);
+        }
+        return res.json();
+      })
+      .then((data) => {
+        const score = data?.score || {};
+        const share = data?.share || {};
+        const pages = score.pages || [];
+        const url = share.shareUrl || share.sharePath || location.href;
+
+        document.title = `${score.title || '曲谱分享'} - 曲谱查看`;
+        titleEl.textContent = score.title || '未命名曲谱';
+        composerEl.textContent = score.composer ? `作曲/编配：${score.composer}` : '匿名';
+        descEl.textContent = score.description || '这份曲谱没有附加说明。';
+        descSecondaryEl.textContent = descEl.textContent;
+
+        linkEl.href = url;
+        linkEl.textContent = url;
+        copyBtn.onclick = () => copyLink(url);
+        openBtn.onclick = () => window.open(url, '_blank', 'noopener');
+
+        renderPages(pages);
+        pageCountEl.textContent = pages.length ? `${pages.length} 页` : '暂无页面';
+        shareStatusEl.textContent = '可查看';
+        expiresEl.textContent = formatDate(share.expiresAt);
+        setStatus('');
+        hideHero();
+      })
+      .catch((err) => {
+        titleEl.textContent = '分享链接不可用';
+        composerEl.textContent = '';
+        descEl.textContent = '';
+        descSecondaryEl.textContent = '无法加载分享内容。';
+        pagesEl.innerHTML = '<div class="empty">无法加载分享内容</div>';
+        shareStatusEl.textContent = '不可用';
+        pageCountEl.textContent = '--';
+        expiresEl.textContent = '--';
+        setStatus(err.message || '加载失败', true);
+        copyBtn.disabled = true;
+        openBtn.disabled = true;
+      });
+  </script>
+</body>
+</html>
