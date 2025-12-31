@@ -4,7 +4,7 @@ WORKDIR /app/backend
 
 # Install dependencies needed for building
 COPY backend/package*.json ./
-RUN npm ci --ignore-scripts
+RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts
 
 # Build TypeScript sources
 COPY backend/tsconfig.json ./tsconfig.json
@@ -20,16 +20,13 @@ ENV NODE_ENV=production \
     PUBLIC_DIR=/app/public \
     DATABASE_PATH=/app/backend/data/db.sqlite
 
-# Tiny init to forward signals in containers
-RUN apk add --no-cache tini
-
-# Build deps for native modules like better-sqlite3
-RUN apk add --no-cache --virtual .build-deps python3 make g++ \
-  && apk add --no-cache libstdc++
+# Tiny init + build deps for native modules like better-sqlite3
+RUN apk add --no-cache tini libstdc++ \
+  && apk add --no-cache --virtual .build-deps python3 make g++
 
 # Install production dependencies (build native extensions)
 COPY backend/package*.json ./
-RUN npm ci --omit=dev \
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev \
   && apk del .build-deps
 
 # Copy compiled backend
@@ -42,6 +39,7 @@ RUN mkdir -p /app/backend/data
 WORKDIR /app
 COPY index.html /app/public/index.html
 COPY share.html /app/public/share.html
+COPY bluebook.html /app/public/bluebook.html
 COPY css /app/public/css
 COPY js /app/public/js
 COPY manifest.webmanifest /app/public/manifest.webmanifest
