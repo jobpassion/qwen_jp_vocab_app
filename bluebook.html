@@ -21,6 +21,25 @@
 </header>
 
 <section class="prompt">
+  <h2>语音设置 (AWS Polly)</h2>
+  <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 1rem;">
+    <label>Access Key ID
+      <input type="text" id="awsAccessKey" placeholder="AKIA..." />
+    </label>
+    <label>Secret Access Key
+      <input type="password" id="awsSecretKey" placeholder="Secret..." />
+    </label>
+    <label>播放速度 (0.5 - 2.0)
+      <input type="number" id="awsPlaybackRate" placeholder="1.0" step="0.1" min="0.2" max="3.0" />
+    </label>
+  </div>
+  <div class="actions-inline" style="margin-top: 0.5rem;">
+    <button id="btnSaveAwsConfig" class="secondary">保存配置</button>
+    <span id="awsStatus" class="status"></span>
+  </div>
+</section>
+
+<section class="prompt">
   <h2>提示词（发给 ChatGPT 生成 JSON）</h2>
   <p class="note">把书页图片发给 ChatGPT，并附上以下提示词，要求严格输出 JSON（不要多余说明）。</p>
   <div class="actions-inline">
@@ -94,6 +113,13 @@
 </footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.10.111/pdf.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script type="importmap">
+  {
+    "imports": {
+      "@aws-sdk/client-polly": "https://esm.sh/@aws-sdk/client-polly@3.451.0?target=es2022&bundle-deps"
+    }
+  }
+</script>
 <script>
   if (window.pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.10.111/pdf.worker.min.js";

@@ -5,7 +5,13 @@ import {
   deleteBluebookPage,
   savePdfDataBinary,
   loadPdfDataBinary,
+  saveAwsConfig,
+  loadAwsConfig,
+  getCachedAudio,
+  saveCachedAudio,
 } from "./storage.js";
+
+import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -68,6 +74,156 @@ const PDF_MODAL_MIN_WIDTH = 360;
 const PDF_MODAL_MIN_HEIGHT = 320;
 const PDF_MODAL_MAX_WIDTH_RATIO = 0.95;
 const PDF_MODAL_MAX_HEIGHT_RATIO = 0.95;
+
+let currentAudio = null;
+let lastPlayedData = null;
+
+async function playAudio(text, btn) {
+  if (!text) return;
+  
+  // Prevent multiple plays
+  if (btn.disabled) return;
+  
+  // Save for Spacebar replay
+  lastPlayedData = { text, btn };
+  
+  const originalText = btn.textContent;
+  btn.textContent = "⏳";
+  btn.disabled = true;
+
+  try {
+    // 1. Check cache
+    const cachedBuffer = await getCachedAudio(text);
+    let arrayBuffer = cachedBuffer;
+
+    // 2. If miss, call AWS
+    if (!arrayBuffer) {
+      const cfg = loadAwsConfig();
+      if (!cfg.accessKeyId || !cfg.secretAccessKey) {
+        alert("请先在上方设置 AWS Access Key 和 Secret Key");
+        throw new Error("Missing AWS credentials");
+      }
+
+      const client = new PollyClient({
+        region: cfg.region || "ap-northeast-1",
+        credentials: {
+          accessKeyId: cfg.accessKeyId,
+          secretAccessKey: cfg.secretAccessKey,
+        },
+      });
+
+      const command = new SynthesizeSpeechCommand({
+        Engine: "neural",
+        OutputFormat: "mp3",
+        Text: text,
+        VoiceId: "Kazuha", // Female, Japanese
+      });
+
+      const response = await client.send(command);
+      // response.AudioStream is a ReadableStream or Blob (in browser)
+      // AWS SDK v3 in browser returns a Uint8Array or Blob usually.
+      // Actually, for browser, we can read it into a buffer.
+      const byteArray = await response.AudioStream.transformToByteArray();
+      arrayBuffer = byteArray.buffer;
+      
+      // Cache it
+      await saveCachedAudio(text, arrayBuffer);
+    }
+
+    // 3. Play
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio = null;
+    }
+
+    const blob = new Blob([arrayBuffer], { type: "audio/mpeg" });
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    
+    // Apply configured speed
+    const cfg = loadAwsConfig();
+    const rate = parseFloat(cfg.playbackRate) || 1.0;
+    audio.playbackRate = rate;
+    
+    currentAudio = audio;
+    
+    // Helper to reset button state
+    const resetBtn = () => {
+      btn.textContent = "🔊";
+      btn.disabled = false;
+      // Reset to original play handler
+      btn.onclick = () => playAudio(text, btn);
+    };
+
+    audio.onended = () => {
+      resetBtn();
+      URL.revokeObjectURL(url);
+    };
+    
+    audio.onerror = () => {
+      console.error("Audio playback error");
+      btn.textContent = "❌";
+      // Let it show error briefly then reset
+      setTimeout(() => {
+         resetBtn();
+      }, 2000);
+    };
+
+    await audio.play();
+    btn.textContent = "⏹"; // Playing state
+    
+    // Override click to stop
+    btn.onclick = () => {
+        if (currentAudio) {
+           currentAudio.pause();
+           currentAudio = null;
+        }
+        resetBtn();
+    };
+
+  } catch (err) {
+    console.error("TTS Error", err);
+    btn.textContent = "❌";
+    setTimeout(() => {
+        btn.textContent = "🔊";
+        btn.disabled = false;
+        // Ensure handler is correct (though it likely didn't change if we failed early)
+        btn.onclick = () => playAudio(text, btn);
+    }, 2000);
+  }
+}
+
+function handleSaveAwsConfig() {
+  const ak = $("#awsAccessKey").value.trim();
+  const sk = $("#awsSecretKey").value.trim();
+  let rate = parseFloat($("#awsPlaybackRate").value);
+  const status = $("#awsStatus");
+  
+  if (!ak || !sk) {
+    toastStatus(status, "Key 不能为空");
+    return;
+  }
+  
+  if (!Number.isFinite(rate) || rate <= 0) {
+      rate = 1.0; // Default fallback
+  }
+  
+  saveAwsConfig({
+    accessKeyId: ak,
+    secretAccessKey: sk,
+    region: "ap-northeast-1",
+    playbackRate: rate
+  });
+  
+  toastStatus(status, "配置已保存");
+}
+
+function loadAwsConfigToUI() {
+  const cfg = loadAwsConfig();
+  if (cfg.accessKeyId) $("#awsAccessKey").value = cfg.accessKeyId;
+  if (cfg.secretAccessKey) $("#awsSecretKey").value = cfg.secretAccessKey;
+  if (cfg.playbackRate) $("#awsPlaybackRate").value = cfg.playbackRate;
+}
 
 function toastStatus(el, text) {
   if (!el) return;
@@ -163,12 +319,48 @@ function parseJsonInput() {
   const normalized = normalizeBluebookData(payload);
   saveBluebookPage(normalized.pageMeta.pageNumber, normalized);
   updateSavedPagesSelect();
-  const select = $("#savedPages");
-  if (select) select.value = String(normalized.pageMeta.pageNumber);
-  currentPageNumber = normalized.pageMeta.pageNumber;
-  currentPageData = normalized;
-  renderCurrentPage();
+  
+  // Switch to new page with pushState
+  switchPage(normalized.pageMeta.pageNumber, 'push');
+  
   toastStatus(status, `已保存页码 ${normalized.pageMeta.pageNumber}，数据已覆盖。`);
+}
+
+// Helper to switch page and manage history
+function switchPage(pageNumber, historyMode = 'push') {
+  // historyMode: 'push' | 'replace' | 'none'
+  const data = getBluebookPage(pageNumber);
+  if (!data) return false;
+
+  currentPageNumber = pageNumber;
+  currentPageData = data;
+
+  // Sync Select UI
+  const select = $("#savedPages");
+  if (select) select.value = String(pageNumber);
+
+  // Sync JSON Input
+  const jsonInput = $("#jsonInput");
+  if (jsonInput) {
+    jsonInput.value = JSON.stringify(data, null, 2);
+  }
+
+  renderCurrentPage();
+
+  // Sync URL
+  if (historyMode !== 'none') {
+    const url = new URL(window.location);
+    // Only update if changed or force replace
+    if (url.searchParams.get("page") !== String(pageNumber)) {
+        url.searchParams.set("page", pageNumber);
+        if (historyMode === 'push') {
+            window.history.pushState({}, "", url);
+        } else {
+            window.history.replaceState({}, "", url);
+        }
+    }
+  }
+  return true;
 }
 
 function loadSelectedPage() {
@@ -177,20 +369,11 @@ function loadSelectedPage() {
   if (!select || !select.value) return;
   const pageNumber = sanitizePageNumber(select.value);
   if (!pageNumber) return;
-  const data = getBluebookPage(pageNumber);
-  if (!data) {
-    toastStatus(status, "未找到该页数据。");
-    return;
-  }
-  currentPageNumber = pageNumber;
-  currentPageData = data;
   
-  const jsonInput = $("#jsonInput");
-  if (jsonInput) {
-    jsonInput.value = JSON.stringify(data, null, 2);
+  const success = switchPage(pageNumber, 'push');
+  if (!success) {
+      toastStatus(status, "未找到该页数据。");
   }
-  
-  renderCurrentPage();
 }
 
 function deleteSelectedPage() {
@@ -202,10 +385,18 @@ function deleteSelectedPage() {
   if (!ok) return;
   deleteBluebookPage(pageNumber);
   updateSavedPagesSelect();
+  
+  // If deleted current page, clear view
   if (currentPageNumber === pageNumber) {
     currentPageNumber = null;
     currentPageData = null;
     renderCurrentPage();
+    // Clear URL param
+    const url = new URL(window.location);
+    if (url.searchParams.has("page")) {
+        url.searchParams.delete("page");
+        window.history.replaceState({}, "", url);
+    }
   }
 }
 
@@ -325,6 +516,7 @@ function renderCurrentPage() {
   }
 
   const { unitTitle, pageNumber } = currentPageData.pageMeta;
+
   const metaCard = document.createElement("div");
   metaCard.className = "page-meta-card";
   metaCard.innerHTML = `
@@ -374,6 +566,15 @@ function renderCurrentPage() {
         const jpText = document.createElement("span");
         buildMarkedText(jpText, example.jp, example.underline);
         jp.appendChild(jpText);
+
+        // TTS Button
+        const ttsBtn = document.createElement("button");
+        ttsBtn.textContent = "🔊";
+        ttsBtn.className = "small secondary";
+        ttsBtn.style.cssText = "margin-left: 8px; padding: 2px 6px; font-size: 12px; border-radius: 4px;";
+        ttsBtn.title = "播放发音 (AWS Polly)";
+        ttsBtn.onclick = () => playAudio(example.jp, ttsBtn);
+        jp.appendChild(ttsBtn);
 
         const editBtn = document.createElement("span");
         editBtn.textContent = " ✎";
@@ -1396,15 +1597,70 @@ function bindUI() {
   if (pdfInput) pdfInput.addEventListener("change", onPdfFileSelected);
 
   bindPdfModalEvents();
+  
+  $("#btnSaveAwsConfig")?.addEventListener("click", handleSaveAwsConfig);
+
+  // Global shortcut for Replay
+  document.addEventListener("keydown", (e) => {
+    if (e.code === "Space") {
+      // Ignore if typing in inputs
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || document.activeElement?.isContentEditable) {
+        return;
+      }
+      
+      e.preventDefault();
+      
+      if (lastPlayedData && lastPlayedData.text && lastPlayedData.btn) {
+        // If the button is no longer in the DOM (e.g. page changed), ignore
+        if (!document.body.contains(lastPlayedData.btn)) {
+           lastPlayedData = null;
+           return;
+        }
+        playAudio(lastPlayedData.text, lastPlayedData.btn);
+      }
+    }
+  });
+  
+  // Handle browser back/forward buttons
+  window.addEventListener("popstate", () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const pageParam = urlParams.get("page");
+    if (pageParam) {
+        const pageNum = sanitizePageNumber(pageParam);
+        if (pageNum) {
+            // 'none' because browser already updated URL
+            switchPage(pageNum, 'none');
+        }
+    } else {
+        // Returned to root, maybe clear?
+        currentPageNumber = null;
+        currentPageData = null;
+        renderCurrentPage();
+    }
+  });
 }
 
 function init() {
   updateSavedPagesSelect();
-  if ($("#savedPages")?.value) {
-    loadSelectedPage();
-  } else {
-    renderCurrentPage();
+  loadAwsConfigToUI();
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const pageParam = urlParams.get("page");
+  
+  let loadedFromUrl = false;
+  if (pageParam) {
+      const pageNum = sanitizePageNumber(pageParam);
+      if (pageNum) {
+          // 'replace' to canonicalize URL if needed, but mostly to set state without new entry
+          loadedFromUrl = switchPage(pageNum, 'replace');
+      }
   }
+
+  if (!loadedFromUrl) {
+      renderCurrentPage();
+  }
+
   loadPersistedPdf();
   bindUI();
 }

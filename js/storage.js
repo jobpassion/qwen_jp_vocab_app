@@ -6,10 +6,12 @@ const BLUEBOOK_PREFIX = "jp_bluebook_page_"; // 蓝宝书页面 key 前缀
 const KEY_API = "jp_vocab_api_cfg_v1";  // API 配置还是集中存
 const KEY_EXAM_HISTORY = "jp_vocab_exam_history_v1";  // 考试历史记录
 const KEY_AUTH = "jp_vocab_auth_session_v1"; // 登录会话
+const KEY_AWS_CONFIG = "jp_vocab_aws_cfg_v1"; // AWS 配置
 
 const PDF_DB_NAME = "jp_vocab_pdf_store";
-const PDF_DB_VERSION = 1;
+const PDF_DB_VERSION = 2; // 升级版本以支持音频缓存
 const PDF_STORE_NAME = "pdf_files";
+const AUDIO_STORE_NAME = "audio_cache"; // 新增音频缓存表
 const PDF_KEY = "current";
 let pdfDbPromise = null;
 
@@ -82,10 +84,13 @@ function openPdfDb() {
   pdfDbPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(PDF_DB_NAME, PDF_DB_VERSION);
     request.onerror = () => reject(request.error);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
       if (!db.objectStoreNames.contains(PDF_STORE_NAME)) {
         db.createObjectStore(PDF_STORE_NAME);
+      }
+      if (!db.objectStoreNames.contains(AUDIO_STORE_NAME)) {
+        db.createObjectStore(AUDIO_STORE_NAME);
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -160,6 +165,53 @@ export async function clearPdfData() {
   } catch (err) {
     console.warn("清理 PDF 数据失败：", err);
   }
+}
+
+// -------- AWS 配置相关 --------
+
+export function saveAwsConfig(cfg) {
+  localStorage.setItem(KEY_AWS_CONFIG, JSON.stringify(cfg));
+}
+
+export function loadAwsConfig() {
+  try {
+    return JSON.parse(localStorage.getItem(KEY_AWS_CONFIG) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+// -------- 音频缓存 (IndexedDB) --------
+
+export async function getCachedAudio(text) {
+  const db = await openPdfDb();
+  if (!db) return null;
+  return new Promise((resolve, reject) => {
+    // 明确指定使用 AUDIO_STORE_NAME
+    const tx = db.transaction(AUDIO_STORE_NAME, "readonly");
+    const store = tx.objectStore(AUDIO_STORE_NAME);
+    const req = store.get(text);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => {
+      console.warn("读取音频缓存失败", req.error);
+      resolve(null); // 即使失败也返回 null，不阻断流程
+    };
+  });
+}
+
+export async function saveCachedAudio(text, arrayBuffer) {
+  const db = await openPdfDb();
+  if (!db) return;
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(AUDIO_STORE_NAME, "readwrite");
+    const store = tx.objectStore(AUDIO_STORE_NAME);
+    const req = store.put(arrayBuffer, text);
+    req.onsuccess = () => resolve();
+    req.onerror = () => {
+      console.warn("写入音频缓存失败", req.error);
+      resolve(); // 忽略写入错误
+    };
+  });
 }
 
 // -------- API 配置相关 --------
