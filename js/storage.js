@@ -214,6 +214,42 @@ export async function saveCachedAudio(text, arrayBuffer) {
   });
 }
 
+async function listCachedAudioEntries() {
+  const db = await openPdfDb();
+  if (!db) return [];
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(AUDIO_STORE_NAME, "readonly");
+    const store = tx.objectStore(AUDIO_STORE_NAME);
+    const entries = [];
+    const req = store.openCursor();
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (cursor) {
+        entries.push({ key: String(cursor.key), data: cursor.value });
+        cursor.continue();
+      }
+    };
+    tx.oncomplete = () => resolve(entries);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+async function clearAudioCache() {
+  const db = await openPdfDb();
+  if (!db) return;
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(AUDIO_STORE_NAME, "readwrite");
+    const store = tx.objectStore(AUDIO_STORE_NAME);
+    const req = store.clear();
+    req.onsuccess = () => resolve();
+    req.onerror = () => {
+      console.warn("清理音频缓存失败", req.error);
+      resolve();
+    };
+  });
+}
+
 // -------- API 配置相关 --------
 
 // 保存 API 配置（对象：{apiBase, model, apiKey}）
@@ -351,15 +387,24 @@ function base64ToUint8Array(base64) {
 }
 
 export async function exportAllData(options = {}) {
-  const { includePdf = true } = options;
+  const { includePdf = true, includeAudioCache = true } = options;
   const pageNumbers = listPages();
   const pages = pageNumbers.map(page => ({
     page: Number(page),
     items: getPage(page),
   }));
+  const bluebookPageNumbers = listBluebookPages();
+  const bluebookPages = bluebookPageNumbers
+    .map(page => ({
+      page: Number(page),
+      data: getBluebookPage(page),
+    }))
+    .filter(entry => entry.data && typeof entry.data === "object");
   const apiConfig = loadApiConfig();
+  const awsConfig = loadAwsConfig();
   const examHistory = loadExamHistory();
   let pdfSection = null;
+  let audioCache = includeAudioCache ? [] : undefined;
 
   if (includePdf) {
     try {
@@ -376,19 +421,41 @@ export async function exportAllData(options = {}) {
     }
   }
 
+  if (includeAudioCache) {
+    try {
+      const entries = await listCachedAudioEntries();
+      audioCache = entries
+        .map((entry) => {
+          const audioBuffer = normalizeToArrayBuffer(entry.data);
+          if (!audioBuffer) return null;
+          return {
+            key: entry.key,
+            encoding: "base64",
+            data: arrayBufferToBase64(audioBuffer),
+          };
+        })
+        .filter(entry => entry);
+    } catch (err) {
+      console.warn("导出音频缓存失败：", err);
+    }
+  }
+
   return {
     format: BACKUP_FORMAT,
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     pages,
+    bluebookPages,
     apiConfig,
+    awsConfig,
     examHistory,
     pdf: pdfSection,
+    ...(includeAudioCache ? { audioCache } : {}),
   };
 }
 
 export async function importAllData(snapshot, options = {}) {
-  const { clearExisting = true, preservePdf = false } = options;
+  const { clearExisting = false, preservePdf = false } = options;
 
   if (!snapshot || typeof snapshot !== "object") {
     throw new Error("备份格式无效");
@@ -403,9 +470,14 @@ export async function importAllData(snapshot, options = {}) {
 
   const importedPages = [];
   const pages = Array.isArray(snapshot.pages) ? snapshot.pages : [];
+  const importedBluebookPages = [];
+  const bluebookPages = Array.isArray(snapshot.bluebookPages) ? snapshot.bluebookPages : [];
+  const audioCache = Array.isArray(snapshot.audioCache) ? snapshot.audioCache : [];
 
   if (clearExisting) {
     listPages().forEach(deletePage);
+    listBluebookPages().forEach(deleteBluebookPage);
+    await clearAudioCache();
   }
 
   for (const entry of pages) {
@@ -415,6 +487,29 @@ export async function importAllData(snapshot, options = {}) {
     const items = Array.isArray(entry.items) ? entry.items : [];
     savePage(pageNumber, items);
     importedPages.push(pageNumber);
+  }
+
+  for (const entry of bluebookPages) {
+    if (!entry || typeof entry !== "object") continue;
+    const pageNumber = Number(entry.page);
+    if (!Number.isFinite(pageNumber) || pageNumber <= 0) continue;
+    const data = entry.data && typeof entry.data === "object" ? entry.data : null;
+    if (!data) continue;
+    saveBluebookPage(pageNumber, data);
+    importedBluebookPages.push(pageNumber);
+  }
+
+  for (const entry of audioCache) {
+    if (!entry || typeof entry !== "object") continue;
+    const key = typeof entry.key === "string" ? entry.key.trim() : "";
+    if (!key) continue;
+    if (entry.encoding !== "base64" || typeof entry.data !== "string") continue;
+    try {
+      const bytes = base64ToUint8Array(entry.data);
+      await saveCachedAudio(key, bytes);
+    } catch (err) {
+      console.warn("导入音频缓存失败：", err);
+    }
   }
 
   if (snapshot.examHistory && typeof snapshot.examHistory === "object") {
@@ -427,6 +522,12 @@ export async function importAllData(snapshot, options = {}) {
     saveApiConfig(snapshot.apiConfig);
   } else if (clearExisting) {
     localStorage.removeItem(KEY_API);
+  }
+
+  if (snapshot.awsConfig && typeof snapshot.awsConfig === "object") {
+    saveAwsConfig(snapshot.awsConfig);
+  } else if (clearExisting) {
+    localStorage.removeItem(KEY_AWS_CONFIG);
   }
 
   const pdfInfo = snapshot.pdf;
@@ -445,9 +546,11 @@ export async function importAllData(snapshot, options = {}) {
   }
 
   importedPages.sort((a, b) => a - b);
+  importedBluebookPages.sort((a, b) => a - b);
 
   return {
     pages: importedPages,
+    bluebookPages: importedBluebookPages,
     hasPdf: Boolean(pdfInfo && pdfInfo.data),
   };
 }

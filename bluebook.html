@@ -14,7 +14,7 @@
   <div class="page-title">
     <div>
       <h1>日语语法蓝宝书 · JSON 解析 + 填空练习</h1>
-      <p class="note">新站点入口，数据保存在浏览器本地（localStorage），重复导入会覆盖同页码数据。</p>
+      <p class="note">新站点入口，数据默认保存在浏览器本地（localStorage），可登录后同步到服务端；重复导入会覆盖同页码数据。</p>
     </div>
     <a class="link-button" href="/index.html">返回红蓝宝书词汇站</a>
   </div>
@@ -80,6 +80,25 @@
       <input id="pdfFileInput" type="file" accept="application/pdf" />
     </label>
   </div>
+</section>
+
+<section class="sync">
+  <h2>账号同步</h2>
+  <div class="actions">
+    <input id="loginEmail" type="email" placeholder="邮箱" autocomplete="username" />
+    <input id="loginPassword" type="password" placeholder="密码" autocomplete="current-password" />
+    <button id="btnLogin" type="button">登录</button>
+    <button id="btnRegister" type="button">注册</button>
+    <button id="btnLogout" type="button" disabled>退出</button>
+    <span id="loginInfo" class="status">未登录</span>
+    <span id="loginStatus" class="status"></span>
+  </div>
+  <div class="actions">
+    <button id="btnSyncPush" type="button" disabled>上传当前浏览器数据到后端</button>
+    <button id="btnSyncPull" type="button" disabled>从后端拉取数据到当前浏览器</button>
+    <span id="syncStatus" class="status"></span>
+  </div>
+  <p class="note">同步包含词汇页、蓝宝书页、测验记录、API/AWS 配置，不包含 PDF 缓存（PDF 保留在本地）。</p>
 </section>
 
 <section class="page-view">

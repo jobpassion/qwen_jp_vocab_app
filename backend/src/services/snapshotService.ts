@@ -19,10 +19,28 @@ export interface PageSnapshot {
   items: WordItem[];
 }
 
+export interface BluebookPageSnapshot {
+  page: number;
+  data: Record<string, unknown>;
+}
+
+export interface AudioCacheEntry {
+  key: string;
+  encoding: 'base64';
+  data: string;
+}
+
 export interface ApiConfig {
   apiBase?: string;
   model?: string;
   apiKey?: string;
+}
+
+export interface AwsConfig {
+  accessKeyId?: string;
+  secretAccessKey?: string;
+  region?: string;
+  playbackRate?: number;
 }
 
 export type ExamHistory = Record<string, unknown>;
@@ -65,7 +83,10 @@ export interface SnapshotPayload {
   version: number;
   exportedAt: string;
   pages: PageSnapshot[];
+  bluebookPages: BluebookPageSnapshot[];
+  audioCache?: AudioCacheEntry[] | undefined;
   apiConfig: ApiConfig;
+  awsConfig: AwsConfig;
   examHistory: ExamHistory;
   pdf: PdfSection | null;
   scores?: ScoreSnapshot[] | undefined;
@@ -156,6 +177,33 @@ const sanitizePages = (value: unknown): PageSnapshot[] => {
     .filter((entry): entry is PageSnapshot => Boolean(entry));
 };
 
+const sanitizeBluebookPages = (value: unknown): BluebookPageSnapshot[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        return null;
+      }
+      const raw = entry as Record<string, unknown>;
+      const page = Number(raw.page);
+      if (!Number.isFinite(page) || page <= 0) {
+        return null;
+      }
+      const data = raw.data;
+      if (!data || typeof data !== 'object') {
+        return null;
+      }
+      return {
+        page,
+        data: { ...(data as Record<string, unknown>) },
+      };
+    })
+    .filter((entry): entry is BluebookPageSnapshot => Boolean(entry));
+};
+
 const sanitizeApiConfig = (value: unknown): ApiConfig => {
   if (!value || typeof value !== 'object') {
     return {};
@@ -172,6 +220,27 @@ const sanitizeApiConfig = (value: unknown): ApiConfig => {
     apiConfig.apiKey = raw.apiKey;
   }
   return apiConfig;
+};
+
+const sanitizeAwsConfig = (value: unknown): AwsConfig => {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+  const raw = value as Record<string, unknown>;
+  const awsConfig: AwsConfig = {};
+  if (typeof raw.accessKeyId === 'string') {
+    awsConfig.accessKeyId = raw.accessKeyId;
+  }
+  if (typeof raw.secretAccessKey === 'string') {
+    awsConfig.secretAccessKey = raw.secretAccessKey;
+  }
+  if (typeof raw.region === 'string') {
+    awsConfig.region = raw.region;
+  }
+  if (typeof raw.playbackRate === 'number' && Number.isFinite(raw.playbackRate)) {
+    awsConfig.playbackRate = raw.playbackRate;
+  }
+  return awsConfig;
 };
 
 const sanitizeExamHistory = (value: unknown): ExamHistory => {
@@ -193,6 +262,35 @@ const sanitizePdfSection = (value: unknown): PdfSection | null => {
     encoding: 'base64',
     data: raw.data,
   };
+};
+
+const sanitizeAudioCache = (value: unknown): AudioCacheEntry[] | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') {
+        return null;
+      }
+      const raw = entry as Record<string, unknown>;
+      const key = toStringOrEmpty(raw.key);
+      if (!key) {
+        return null;
+      }
+      if (raw.encoding !== 'base64' || typeof raw.data !== 'string' || !raw.data.trim()) {
+        return null;
+      }
+      return {
+        key,
+        encoding: 'base64',
+        data: raw.data,
+      };
+    })
+    .filter((entry): entry is AudioCacheEntry => Boolean(entry));
 };
 
 const sanitizeImageSection = (value: unknown): EncodedImageSection | null => {
@@ -353,7 +451,10 @@ const sanitizeSnapshot = (payload: unknown): SnapshotPayload => {
     version,
     exportedAt,
     pages: sanitizePages(raw.pages),
+    bluebookPages: sanitizeBluebookPages(raw.bluebookPages),
+    audioCache: sanitizeAudioCache(raw.audioCache),
     apiConfig: sanitizeApiConfig(raw.apiConfig),
+    awsConfig: sanitizeAwsConfig(raw.awsConfig),
     examHistory: sanitizeExamHistory(raw.examHistory),
     pdf: sanitizePdfSection(raw.pdf),
     scores: sanitizeScores(raw.scores),

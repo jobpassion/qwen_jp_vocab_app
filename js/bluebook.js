@@ -9,6 +9,11 @@ import {
   loadAwsConfig,
   getCachedAudio,
   saveCachedAudio,
+  saveAuthSession,
+  loadAuthSession,
+  clearAuthSession,
+  exportAllData,
+  importAllData,
 } from "./storage.js";
 
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
@@ -59,6 +64,7 @@ const DEFAULT_EXAM_STATE = {
 let currentPageData = null;
 let currentPageNumber = null;
 let examState = { ...DEFAULT_EXAM_STATE };
+let authSession = null;
 
 let pdfDoc = null;
 let pdfPageCount = 0;
@@ -232,6 +238,202 @@ function toastStatus(el, text) {
   setTimeout(() => {
     el.textContent = "";
   }, 3200);
+}
+
+function setLoginStatus(text, timeout = 0) {
+  const status = $("#loginStatus");
+  if (!status) return;
+  status.textContent = text;
+  if (timeout > 0) {
+    setTimeout(() => {
+      if (status.textContent === text) status.textContent = "";
+    }, timeout);
+  }
+}
+
+function setSyncStatus(text, timeout = 0) {
+  const status = $("#syncStatus");
+  if (!status) return;
+  status.textContent = text;
+  if (timeout > 0) {
+    setTimeout(() => {
+      if (status.textContent === text) status.textContent = "";
+    }, timeout);
+  }
+}
+
+function updateAuthUI() {
+  const isLoggedIn = !!authSession?.token;
+  const loginInfo = $("#loginInfo");
+  if (loginInfo) {
+    loginInfo.textContent = isLoggedIn ? `已登录：${authSession.user.email}` : "未登录";
+  }
+  const btnLogin = $("#btnLogin");
+  const btnRegister = $("#btnRegister");
+  const btnLogout = $("#btnLogout");
+  if (btnLogin) btnLogin.disabled = isLoggedIn;
+  if (btnRegister) btnRegister.disabled = isLoggedIn;
+  if (btnLogout) btnLogout.disabled = !isLoggedIn;
+  const syncPush = $("#btnSyncPush");
+  const syncPull = $("#btnSyncPull");
+  if (syncPush) syncPush.disabled = !isLoggedIn;
+  if (syncPull) syncPull.disabled = !isLoggedIn;
+}
+
+async function onLogin(event) {
+  event?.preventDefault?.();
+  const email = $("#loginEmail")?.value?.trim();
+  const password = $("#loginPassword")?.value;
+  if (!email || !password) {
+    setLoginStatus("请输入邮箱和密码");
+    return;
+  }
+  try {
+    setLoginStatus("正在登录…");
+    const res = await fetch("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error || `登录失败 (${res.status})`);
+    }
+    const data = await res.json();
+    authSession = data;
+    saveAuthSession(data);
+    setLoginStatus("登录成功", 3000);
+    updateAuthUI();
+  } catch (err) {
+    console.error(err);
+    setLoginStatus(err.message || "登录失败");
+  }
+}
+
+async function onRegister(event) {
+  event?.preventDefault?.();
+  const email = $("#loginEmail")?.value?.trim();
+  const password = $("#loginPassword")?.value;
+  if (!email || !password) {
+    setLoginStatus("请输入邮箱和密码");
+    return;
+  }
+  try {
+    setLoginStatus("正在注册…");
+    const res = await fetch("/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const message = body?.error || (res.status === 409 ? "邮箱已被注册" : `注册失败 (${res.status})`);
+      throw new Error(message);
+    }
+    setLoginStatus("注册成功，正在登录…");
+    await onLogin();
+  } catch (err) {
+    console.error(err);
+    setLoginStatus(err.message || "注册失败");
+  }
+}
+
+async function onLogout() {
+  if (!authSession?.token) {
+    clearAuthSession();
+    authSession = null;
+    updateAuthUI();
+    return;
+  }
+  try {
+    await fetch("/auth/logout", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${authSession.token}` },
+    });
+  } catch (err) {
+    console.warn("退出登录请求失败", err);
+  } finally {
+    clearAuthSession();
+    authSession = null;
+    setLoginStatus("已退出登录", 2000);
+    updateAuthUI();
+  }
+}
+
+async function syncToServer() {
+  if (!authSession?.token) {
+    setSyncStatus("请先登录");
+    return;
+  }
+  setSyncStatus("正在上传本地数据…");
+  try {
+    const snapshot = await exportAllData({ includePdf: false, includeAudioCache: false });
+    const res = await fetch("/sync", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authSession.token}`,
+      },
+      body: JSON.stringify(snapshot),
+    });
+    if (res.status === 401) {
+      await onLogout();
+      throw new Error("登录已失效，请重新登录");
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error || `上传失败 (${res.status})`);
+    }
+    setSyncStatus("上传成功", 3500);
+  } catch (err) {
+    console.error(err);
+    setSyncStatus(err.message || "上传失败");
+  }
+}
+
+async function syncFromServer() {
+  if (!authSession?.token) {
+    setSyncStatus("请先登录");
+    return;
+  }
+  setSyncStatus("正在从后端获取数据…");
+  try {
+    const res = await fetch("/sync", {
+      headers: { Authorization: `Bearer ${authSession.token}` },
+    });
+    if (res.status === 401) {
+      await onLogout();
+      throw new Error("登录已失效，请重新登录");
+    }
+    if (res.status === 404) {
+      setSyncStatus("后端暂无同步数据", 3500);
+      return;
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error || `获取失败 (${res.status})`);
+    }
+    const record = await res.json();
+    if (!record?.snapshot) {
+      throw new Error("返回数据不完整");
+    }
+    const result = await importAllData(record.snapshot, { clearExisting: false, preservePdf: true });
+    loadAwsConfigToUI();
+    updateSavedPagesSelect();
+    const nextPage = result.bluebookPages?.[0] ?? null;
+    if (nextPage) {
+      switchPage(nextPage, "replace");
+    } else {
+      currentPageNumber = null;
+      currentPageData = null;
+      renderCurrentPage();
+    }
+    const detail = result.bluebookPages?.length ? `已同步蓝宝书 ${result.bluebookPages.length} 页` : "同步完成";
+    setSyncStatus(detail, 5000);
+  } catch (err) {
+    console.error(err);
+    setSyncStatus(err.message || "同步失败");
+  }
 }
 
 function updateSavedPagesSelect() {
@@ -1599,6 +1801,11 @@ function bindUI() {
   bindPdfModalEvents();
   
   $("#btnSaveAwsConfig")?.addEventListener("click", handleSaveAwsConfig);
+  $("#btnLogin")?.addEventListener("click", onLogin);
+  $("#btnRegister")?.addEventListener("click", onRegister);
+  $("#btnLogout")?.addEventListener("click", onLogout);
+  $("#btnSyncPush")?.addEventListener("click", syncToServer);
+  $("#btnSyncPull")?.addEventListener("click", syncFromServer);
 
   // Global shortcut for Replay
   document.addEventListener("keydown", (e) => {
@@ -1644,6 +1851,8 @@ function bindUI() {
 function init() {
   updateSavedPagesSelect();
   loadAwsConfigToUI();
+  authSession = loadAuthSession();
+  updateAuthUI();
 
   const urlParams = new URLSearchParams(window.location.search);
   const pageParam = urlParams.get("page");

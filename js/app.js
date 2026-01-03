@@ -801,7 +801,7 @@ async function syncToServer() {
   }
   setSyncStatus("正在上传本地数据…");
   try {
-    const snapshot = await exportAllData({ includePdf: false });
+    const snapshot = await exportAllData({ includePdf: false, includeAudioCache: false });
     const res = await fetch("/sync", {
       method: "POST",
       headers: {
@@ -851,7 +851,7 @@ async function syncFromServer() {
     if (!record?.snapshot) {
       throw new Error("返回数据不完整");
     }
-    const result = await importAllData(record.snapshot, { clearExisting: true, preservePdf: true });
+    const result = await importAllData(record.snapshot, { clearExisting: false, preservePdf: true });
     loadApiCfgToUI();
     refreshSavedPages();
     refreshExamHistory();
@@ -1103,7 +1103,7 @@ async function onImportBackup(event) {
       return;
     }
     setBackupStatus("正在导入数据…");
-    const result = await importAllData(snapshot, { clearExisting: true });
+    const result = await importAllData(snapshot, { clearExisting: false });
     loadApiCfgToUI();
     refreshSavedPages();
     refreshExamHistory();
